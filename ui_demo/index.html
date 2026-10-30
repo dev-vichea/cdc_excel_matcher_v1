@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mekong Shipping · Import workflow demo</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">◇</span><span>Mekong</span></div>
+        <label class="company-switcher" for="workspace-company">
+          <span><strong>Company workspace</strong><small>Choose the company to view</small></span>
+          <select id="workspace-company" aria-label="Company workspace"></select>
+        </label>
+        <div class="nav-label">WORK</div>
+        <nav aria-label="Main navigation">
+          <button class="nav-item" type="button" data-nav="dashboard"><span class="nav-icon">▦</span>Dashboard</button>
+          <button class="nav-item active-parent" type="button" data-nav="imports"><span class="nav-icon">◈</span>Shipments</button>
+          <div class="subnav">
+            <button type="button" data-nav="all">All shipments</button>
+            <button class="active" type="button" data-nav="imports">Imports</button>
+            <button type="button" data-nav="exports">Exports</button>
+          </div>
+          <button class="nav-item" type="button" data-nav="tasks"><span class="nav-icon">☷</span>My tasks</button>
+        </nav>
+        <div class="nav-label second">OPERATIONS</div>
+        <nav aria-label="Operations navigation">
+          <button class="nav-item" type="button" data-nav="documents"><span class="nav-icon">▤</span>Documents</button>
+          <button class="nav-item" type="button" data-nav="transport"><span class="nav-icon">♧</span>Transport</button>
+          <button class="nav-item" type="button" data-nav="customs"><span class="nav-icon">▥</span>Customs & permits</button>
+          <button class="nav-item" type="button" data-nav="cdc"><span class="nav-icon">▤</span>CDC master lists</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="nav-item muted"><span class="nav-icon">⚙</span>Settings</div>
+          <div class="profile"><span class="avatar">SD</span><span><strong>Sokha Dara</strong><small>Operations lead</small></span></div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div id="breadcrumb">Workspace <span>/</span> Imports</div>
+          <div class="topbar-right"><span class="today">Mon, 26 Oct 2026 · ICT</span><span class="top-icon">⌕</span><span class="demo-pill">● Demo workspace</span></div>
+        </header>
+        <div id="view" class="view"></div>
+      </main>
+    </div>
+    <script src="vendor/xlsx.full.min.js"></script>
+    <script src="extract.js"></script>
+    <script src="cdc_reader.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
