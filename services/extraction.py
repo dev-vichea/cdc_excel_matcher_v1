@@ -305,6 +305,15 @@ def extract_cdc(data, filename):
             columns = (1, 2, 3, 16)
         if columns is None:
             continue
+        unit_price_col = None
+        for _, cells in rows[:20]:
+            h_upper = [_value(v).upper() for v in cells]
+            for idx, h in enumerate(h_upper):
+                if any(term in h for term in ('UNIT PRICE', 'UNIT_PRICE', 'U.PRICE', 'តម្លៃរាយ', '单价')) and 'TOTAL' not in h:
+                    unit_price_col = idx
+                    break
+            if unit_price_col is not None:
+                break
         name_col, unit_col, approved_col, remaining_col = columns
         for rn,cells in rows:
             if len(cells) <= max(name_col, unit_col, approved_col):continue
@@ -313,7 +322,8 @@ def extract_cdc(data, filename):
             approved=_number(cells[approved_col])
             if not name or approved is None or not unit:continue
             remaining=_number(cells[remaining_col]) if remaining_col is not None and len(cells)>remaining_col else None
+            unit_price=_number(cells[unit_price_col]) if unit_price_col is not None and len(cells)>unit_price_col else None
             items.append({'sheet':sheet_name,'row':rn,'serial':_value(cells[0]),'description':name,
-                         'unit':unit,'approved':approved,'remaining':remaining})
+                         'unit':unit,'approved':approved,'remaining':remaining,'unit_price':unit_price})
         if items:break
     return {'company':company,'qip':qip,'sheet':sheet_name if items else ''},items

@@ -86,6 +86,22 @@ class TestPermitGeneration(unittest.TestCase):
         self.assertEqual(inv['B9'].value, 'BY TRUCK')
         self.assertEqual(inv['B10'].value, 'JIANGSU, CHINA TO PHNOM PENH, CAMBODIA')
         self.assertEqual(pl['B10'].value, 'JIANGSU, CHINA TO PHNOM PENH, CAMBODIA')
+
+        # Check Consignee address split across rows 13 and 14
+        self.assertEqual(inv.cell(12, 2).value, 'XIN CAI FU (CAMBODIA) CO., LTD.')
+        self.assertEqual(inv.cell(13, 2).value, 'PHUM DOMNAK TROYEOUNG, SANGKAT CHOM CHAO II,')
+        self.assertEqual(inv.cell(14, 2).value, 'KHAN POR SEN CHEY PHNOM PENH,')
+        self.assertEqual(inv.cell(15, 2).value, 'KINGDOM OF CAMBODIA.')
+        self.assertEqual(inv.cell(16, 2).value, 'SHIPPING PERSON:')
+        self.assertEqual(inv.cell(17, 2).value, 'VAT No : LO01-902303477')
+
+        self.assertEqual(pl.cell(12, 2).value, 'XIN CAI FU (CAMBODIA) CO., LTD.')
+        self.assertEqual(pl.cell(13, 2).value, 'PHUM DOMNAK TROYEOUNG, SANGKAT CHOM CHAO II,')
+        self.assertEqual(pl.cell(14, 2).value, 'KHAN POR SEN CHEY PHNOM PENH,')
+        self.assertEqual(pl.cell(15, 2).value, 'KINGDOM OF CAMBODIA.')
+        self.assertEqual(pl.cell(16, 2).value, 'SHIPPING PERSON:')
+        self.assertEqual(pl.cell(17, 2).value, 'VAT No : LO01-902303477')
+
         self.assertEqual(inv['A23'].value, '211/26')
         self.assertEqual(inv['B23'].value, 'II - RAW MATERIALS AND ACCESSORIES')
 
@@ -96,40 +112,42 @@ class TestPermitGeneration(unittest.TestCase):
         self.assertEqual(inv.cell(24, 4).value, 6406)
         self.assertEqual(inv.cell(24, 5).value, 'Kg')
         self.assertEqual(inv.cell(24, 5).alignment.horizontal, 'left')
+        self.assertEqual(inv.cell(24, 6).value, 4.5)  # Matches CDC Master List unit price
         self.assertEqual(inv.cell(24, 7).value, '=D24*F24')
 
         self.assertEqual(pl['B8'].value, 'RE2612040')  # No raw =INV!B8 formula!
         self.assertEqual(pl['H8'].value, '29-Oct-2026')
-        self.assertEqual(pl.cell(42, 2).value, '1X45 HQ PART OF CFS/CFS')
+        self.assertEqual(pl.cell(43, 2).value, '1X45 HQ PART OF CFS/CFS')
 
-        # On PL: Items start at row 23
-        self.assertEqual(pl.cell(23, 1).value, 284)  # Row 23 is Knitted fabric (284 pkgs)
-        self.assertEqual(pl.cell(23, 2).value, 'KNITTED FABRIC')
+        # On PL: Items start at row 24 (row 23 is Category header)
+        self.assertEqual(pl.cell(24, 1).value, 284)  # Row 24 is Knitted fabric (284 pkgs)
+        self.assertEqual(pl.cell(24, 2).value, 'KNITTED FABRIC')
 
         self.assertEqual(inv.cell(25, 1).value, 13) # Row 25 is CDC #13: Ribbon
         self.assertEqual(inv.cell(25, 2).value, 'RIBBON')
-        self.assertEqual(pl.cell(24, 1).value, 1)   # Ribbon has 1 pkg on PL (row 24)
-        self.assertEqual(pl.cell(24, 2).value, 'RIBBON')
-        self.assertEqual(pl.cell(24, 6).alignment.horizontal, 'left')
+        self.assertEqual(pl.cell(25, 1).value, 1)   # Ribbon has 1 pkg on PL (row 25)
+        self.assertEqual(pl.cell(25, 2).value, 'RIBBON')
+        self.assertEqual(pl.cell(25, 6).alignment.horizontal, 'left')
 
-        # Row 29 on INV / Row 28 on PL is CDC #28: Elastic band (converted qty: 407 Gross, 36 pkgs)
+        # Row 29 on INV and PL is CDC #28: Elastic band (converted qty: 407 Gross, 36 pkgs)
         self.assertEqual(inv.cell(29, 1).value, 28)
         self.assertEqual(inv.cell(29, 2).value, 'ELASTIC BAND')
         self.assertEqual(inv.cell(29, 4).value, 407)
         self.assertEqual(inv.cell(29, 5).value, 'Gross')
+        self.assertEqual(inv.cell(29, 6).value, 3.0)  # Matches CDC Master List unit price ($3.00, not invoice-derived $8.66)
         self.assertEqual(inv.cell(29, 7).value, '=D29*F29')
 
-        self.assertEqual(pl.cell(28, 1).value, 36)
-        self.assertEqual(pl.cell(28, 2).value, 'ELASTIC BAND')
-        self.assertEqual(pl.cell(28, 5).value, 407)
-        self.assertEqual(pl.cell(28, 6).value, 'Gross')
+        self.assertEqual(pl.cell(29, 1).value, 36)
+        self.assertEqual(pl.cell(29, 2).value, 'ELASTIC BAND')
+        self.assertEqual(pl.cell(29, 5).value, 407)
+        self.assertEqual(pl.cell(29, 6).value, 'Gross')
 
         self.assertEqual(inv.cell(33, 1).value, 86) # Row 33 is CDC #86: Elastic string
         self.assertEqual(inv.cell(40, 7).value, '=SUM(G24:G33)')
         self.assertEqual(inv.cell(43, 5).value, 'WEALDONE LIMITED')
 
-        self.assertEqual(pl.cell(39, 1).value, '=SUM(A23:A32)')
-        self.assertEqual(pl.cell(42, 6).value, 'WEALDONE LIMITED')
+        self.assertEqual(pl.cell(40, 1).value, '=SUM(A24:A33)')
+        self.assertEqual(pl.cell(43, 6).value, 'WEALDONE LIMITED')
 
         # 5. Cut-Stock Deduction
         periods = detect_period_columns(cdc_bytes)

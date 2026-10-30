@@ -27,7 +27,14 @@ from services.cutstock_updater import (
     apply_deductions_to_cdc_workbook,
 )
 from services.i18n import t, get_font_css
-from shipping_ui import render as render_shipping_workspace
+from settings_ui import render_settings_workspace
+from services.settings_store import (
+    get_settings,
+    get_default_template_path,
+    get_default_template_bytes,
+    get_default_cdc_path,
+    get_default_cdc_bytes,
+)
 
 ROOT = Path(__file__).parent
 MAPPINGS_PATH = ROOT / 'data' / 'approved_mappings.json'
@@ -256,10 +263,10 @@ lang_choice = st.sidebar.selectbox('🌐 Language / ភាសា', ['English', '
 lang = 'km' if 'ខ្មែរ' in lang_choice else 'en'
 st.session_state['lang'] = lang
 
-workspace_options = [t('ws_matcher', lang), t('ws_shipments', lang)]
+workspace_options = [t('ws_matcher', lang), t('ws_settings', lang)]
 workspace = st.sidebar.radio(t('workspace_view', lang), workspace_options)
-if workspace == t('ws_shipments', lang):
-    render_shipping_workspace(ROOT)
+if workspace == t('ws_settings', lang):
+    render_settings_workspace(ROOT, lang)
     st.stop()
 
 
@@ -309,6 +316,15 @@ st.title(t('app_title', lang))
 st.caption(t('app_subtitle', lang))
 
 active_job = st.session_state.get('job')
+current_settings = get_settings()
+
+default_cdc_path = get_default_cdc_path()
+has_default_cdc = default_cdc_path.is_file()
+default_cdc_name = current_settings.get("cdc_filename") or default_cdc_path.name
+
+default_tpl_path = get_default_template_path()
+has_default_tpl = default_tpl_path.is_file()
+default_tpl_name = current_settings.get("template_filename") or default_tpl_path.name
 
 # ==========================================================
 # STEP 1: UPLOAD 2 FILES + OPTIONAL BILL (OR LOAD SAMPLES)
@@ -323,14 +339,30 @@ with st.container(border=True):
             key='ship_uploader',
             label_visibility='collapsed'
         )
+        if not shipfile:
+            st.caption("👈 Upload your supplier invoice here to start matching.")
+        else:
+            st.caption(f"✓ Selected: `{shipfile.name}`")
     with col_u2:
-        st.markdown(f"**{t('upload_cdc', lang)}**")
+        c_title_c1, c_title_c2 = st.columns([2, 1], vertical_alignment="center")
+        with c_title_c1:
+            st.markdown(f"**{t('upload_cdc', lang)}**")
+        with c_title_c2:
+            if has_default_cdc:
+                st.markdown(":green-badge[:material/check_circle: Auto-Loaded]")
+
         cdcfile = st.file_uploader(
             "Upload CDC Master",
             type=['xlsx'],
             key='cdc_uploader',
-            label_visibility='collapsed'
+            label_visibility='collapsed',
+            help="Default master list is auto-loaded from local machine. Upload here only to override."
         )
+        if not cdcfile and has_default_cdc:
+            st.caption(f"✓ Auto-loaded local master: `{default_cdc_name}` (Ready — no upload needed)")
+        elif cdcfile:
+            st.caption(f"⚠️ Using session override: `{cdcfile.name}`")
+
     with col_u3:
         st.markdown(f"**{t('upload_bill', lang)}**")
         billfile = st.file_uploader(
@@ -339,12 +371,16 @@ with st.container(border=True):
             key='bill_uploader',
             label_visibility='collapsed'
         )
+        if not billfile:
+            st.caption("Optional: B/L or transport document.")
+        else:
+            st.caption(f"✓ Selected: `{billfile.name}`")
 
     # Optional Custom Permit Template Expander
-    active_tpl_name = active_job.get('template_filename') if active_job else None
-    tpl_status = f"🎨 Active: {active_tpl_name}" if active_tpl_name else "🎨 Active: Default (1-26TKYM164.xlsx)"
-    with st.expander(f"{t('custom_template_title', lang)} ({tpl_status})", expanded=bool(active_tpl_name)):
-        st.caption(t('custom_template_desc', lang))
+    active_tpl_name = active_job.get('template_filename') if active_job else default_tpl_name
+    tpl_badge = "Auto-Loaded" if has_default_tpl else "Default"
+    with st.expander(f"🎨 {t('custom_template_title', lang)} (:green[{tpl_badge}]: `{active_tpl_name}`)", expanded=False):
+        st.caption(f"✓ **Active template:** `{active_tpl_name}` (auto-loaded from local machine). Upload below only to temporarily override for this session.")
         custom_tpl = st.file_uploader(
             "Custom Permit Template (.xlsx)",
             type=['xlsx'],
@@ -358,36 +394,43 @@ with st.container(border=True):
                 st.session_state['job'] = active_job
                 st.rerun()
 
-        if active_job and active_job.get('template_bytes'):
+        if active_job and active_job.get('template_bytes') and active_job.get('template_filename') != default_tpl_name:
             if st.button("↺ Reset to Default Template", key="reset_tpl_btn"):
-                active_job['template_bytes'] = None
-                active_job.pop('template_filename', None)
+                active_job['template_bytes'] = get_default_template_bytes()
+                active_job['template_filename'] = default_tpl_name
                 st.session_state['job'] = active_job
                 st.rerun()
 
+    can_process = bool(shipfile and (cdcfile or has_default_cdc))
     btn_process = st.button(
         t('extract_btn', lang),
         type='primary',
         width="stretch",
-        disabled=not(shipfile and cdcfile)
+        disabled=not can_process
     )
 
-    if btn_process and shipfile and cdcfile:
-        tpl_bytes = custom_tpl.getvalue() if custom_tpl else None
-        tpl_name = custom_tpl.name if custom_tpl else ''
+    if btn_process and can_process:
+        if cdcfile:
+            c_bytes = cdcfile.getvalue()
+            c_name = cdcfile.name
+        else:
+            c_bytes = get_default_cdc_bytes()
+            c_name = default_cdc_name
+
+        tpl_bytes = custom_tpl.getvalue() if custom_tpl else get_default_template_bytes()
+        tpl_name = custom_tpl.name if custom_tpl else default_tpl_name
         b_bytes = billfile.getvalue() if billfile else None
         b_name = billfile.name if billfile else ''
         if process_uploaded_files(
             shipfile.getvalue(), shipfile.name,
-            cdcfile.getvalue(), cdcfile.name,
+            c_bytes, c_name,
             b_bytes, b_name,
             tpl_bytes, tpl_name
         ):
             st.rerun()
 
-# If no job is active, show quick intro and stop
+# If no job is active, stop
 if not active_job:
-    st.info(t('onboarding_guide', lang))
     st.stop()
 
 # ==========================================================
@@ -578,9 +621,13 @@ with tab_items:
                 st.session_state[f'dec_{serial}_{index}'] = 'Approved'
         st.rerun()
 
+    # ====================================================
+    # 1. OVERVIEW MATCHING TABLE (SUMMARY DATAFRAME)
+    # ====================================================
     overview_table = []
     has_any_converted = False
-    for index, r in sorted(enumerate(results), key=_get_item_cdc_sort_key):
+    sorted_items = sorted(enumerate(results), key=_get_item_cdc_sort_key)
+    for index, r in sorted_items:
         sel = selections[index]
         match = sel.get('match')
         raw_qty = r.get('qty')
@@ -608,6 +655,7 @@ with tab_items:
         orig_desc = r['chinese'] or r['english_provided'] or '—'
         cdc_desc = match['description'] if match else 'No Match'
 
+        th_price_val = match['unit_price'] if match and match.get('unit_price') is not None else r.get('unit_price')
         overview_table.append({
             t('th_cdc_no', lang): cdc_no,
             t('th_orig_desc', lang): orig_desc,
@@ -615,35 +663,103 @@ with tab_items:
             t('th_qty', lang): format_quantity(cdc_qty),
             t('th_orig_unit', lang): raw_unit or '—',
             t('th_cdc_unit', lang): cdc_unit,
-            t('th_price', lang): f"${r['unit_price']:,.2f}" if r.get('unit_price') is not None else '—',
+            t('th_price', lang): f"${th_price_val:,.2f}" if th_price_val is not None else '—',
             t('th_status', lang): status_text,
         })
     st.dataframe(pd.DataFrame(overview_table), hide_index=True, width="stretch")
 
-    if has_any_converted:
-        st.info("Unit conversion applied: For items where the invoice unit is meters (m) and the CDC quota is Gross, quantity is calculated as integer division `qty // 144` (e.g. 58,724 m / 144 = 407 Gross).")
+    st.markdown('<div style="height: 12px;"></div>', unsafe_allow_html=True)
 
-    with st.expander("🔍 Adjust Item Candidates & Translation Memory", expanded=False):
-        for index, r in enumerate(results):
-            c_d1, c_d2 = st.columns([1, 1])
-            with c_d1:
-                st.write(f"**Line {r['row']}:** {r['chinese'] or r['english_provided']}")
-                edited = st.text_input(t('en_term_matching', lang), value=base_results[index]['query'], key=f'translation_{serial}_{index}')
-                if st.button(t('save_tr_btn', lang), key=f'save_tr_{serial}_{index}'):
+    # ====================================================
+    # 2. INTERACTIVE ASSIGNMENT TABLE VIEW (EDIT & SELECT)
+    # ====================================================
+    st.markdown("#### 🛠️ Assign CDC Quota & Fine-Tune")
+    st.caption("Click on any dropdown in the **Assign CDC Quota** column to select a different quota match, or click :material/tune: to adjust search keywords.")
+
+    with st.container(border=True):
+        col_w = [0.8, 3.2, 1.2, 3.8, 1.2, 1.0, 1.0, 0.6]
+        h_cols = st.columns(col_w, vertical_alignment="center")
+        h_cols[0].markdown("**CDC #**")
+        h_cols[1].markdown("**Invoice Item**")
+        h_cols[2].markdown("**Inv Qty**")
+        h_cols[3].markdown("**Assign CDC Quota**")
+        h_cols[4].markdown("**CDC Qty**")
+        h_cols[5].markdown("**Unit Price**")
+        h_cols[6].markdown("**Status**")
+        h_cols[7].markdown("")
+
+        st.divider()
+
+        for index, r in sorted_items:
+            sel = selections[index]
+            match = sel.get('match')
+            raw_qty = r.get('qty')
+            raw_unit = r.get('unit', '')
+
+            if match and match.get('unit'):
+                cdc_unit = match['unit']
+                cdc_qty, is_converted = convert_unit_quantity(raw_qty, raw_unit, cdc_unit)
+            else:
+                cdc_unit = '—'
+                cdc_qty = raw_qty
+                is_converted = False
+
+            if match:
+                raw_s = str(match.get('serial') or match['row'])
+                cdc_no = raw_s.lstrip('#').strip()
+            else:
+                cdc_no = f"L{r['row']}"
+
+            orig_desc = r['chinese'] or r['english_provided'] or f"Item {r['row']}"
+            th_price_val = match['unit_price'] if match and match.get('unit_price') is not None else r.get('unit_price')
+
+            candidates = r['candidates']
+            top_score = candidates[0]['score'] if candidates else 0
+
+            candidate_ids = [None] + [(x['sheet'], x['row']) for x in candidates]
+            option_names = {None: '— Unmatched'}
+            option_names.update({
+                (x['sheet'], x['row']): f"#{x.get('serial', x['row'])}: {x['description']} ({x['unit']}) · {x['score']:.0f}%"
+                for x in candidates
+            })
+            current_pick = (match['sheet'], match['row']) if match else None
+            default_idx = candidate_ids.index(current_pick) if current_pick in candidate_ids else 0
+
+            r_cols = st.columns(col_w, vertical_alignment="center")
+            r_cols[0].markdown(f"**#{cdc_no}**")
+            r_cols[1].write(orig_desc)
+            r_cols[2].write(f"{format_quantity(raw_qty)} {raw_unit or '—'}")
+            r_cols[3].selectbox(
+                "Assign CDC",
+                options=candidate_ids,
+                index=default_idx,
+                format_func=lambda k: option_names[k],
+                key=f'pick_{serial}_{index}',
+                label_visibility="collapsed"
+            )
+            r_cols[4].write(f"{format_quantity(cdc_qty)} {cdc_unit}")
+            r_cols[5].write(f"${th_price_val:,.2f}" if th_price_val is not None else "—")
+            if top_score >= 99:
+                r_cols[6].markdown(":green-badge[100%]")
+            elif top_score >= 60:
+                r_cols[6].markdown(f":orange-badge[{top_score:.0f}%]")
+            else:
+                r_cols[6].markdown(":red-badge[Unmatched]")
+
+            with r_cols[7].popover("", icon=":material/tune:", help="Tune search keyword or save translation to memory"):
+                st.markdown(f"**Line {r['row']}:** `{orig_desc}`")
+                edited = st.text_input(
+                    "English search keyword",
+                    value=base_results[index]['query'],
+                    key=f'translation_{serial}_{index}',
+                    label_visibility="visible"
+                )
+                if st.button("💾 Save to Memory", key=f'save_tr_{serial}_{index}', width="stretch"):
                     try:
                         save_verified_translation(TRANSLATIONS_PATH, r['chinese'], edited)
-                        st.success(t('tr_saved_success', lang))
+                        st.toast("Saved translation to memory!", icon="💾")
                     except Exception as e:
                         st.error(f'Could not save: {e}')
-            with c_d2:
-                candidates = r['candidates']
-                candidate_ids = [None] + [(x['sheet'], x['row']) for x in candidates]
-                option_names = {None: '— No match'}
-                option_names.update({(x['sheet'], x['row']): f"#{x.get('serial', x['row'])}: {x['description']} ({x['unit']}) · {x['score']}%" for x in candidates})
-                current_pick = (selections[index]['match']['sheet'], selections[index]['match']['row']) if selections[index].get('match') else None
-                default_idx = candidate_ids.index(current_pick) if current_pick in candidate_ids else 0
-                chosen = st.selectbox(t('choose_cdc_cand', lang), options=candidate_ids, index=default_idx,
-                                      format_func=lambda key: option_names[key], key=f'pick_{serial}_{index}')
 
 # TAB 2: NEW INVOICE PERMIT PREVIEW
 with tab_permit_inv:
@@ -684,14 +800,16 @@ with tab_permit_inv:
             is_converted = False
 
         total_usd = float(res.get('total') or 0.0)
-        if is_converted and qty > 0 and total_usd:
+        if match and match.get('unit_price') is not None:
+            price = float(match['unit_price'])
+        elif is_converted and qty > 0 and total_usd:
             price = round(total_usd / qty, 4)
             if round(round(total_usd / qty, 2) * qty, 2) == round(total_usd, 2):
                 price = round(total_usd / qty, 2)
         else:
             price = float(res.get('unit_price') or 0.0)
 
-        line_amount = round(qty * price, 2) if is_converted else total_usd
+        line_amount = round(qty * price, 2)
         total_inv_amount += line_amount
 
         permit_inv_rows.append({

@@ -138,11 +138,17 @@ def export_permit_draft(shipmeta,cdcmeta,results,selections,packing_items,pairs,
             unit = raw_unit
             qty = raw_qty
             is_conv = False
-        price = round(result['total'] / qty, 4) if is_conv and qty else result['unit_price']
+        if match and match.get('unit_price') is not None:
+            price = float(match['unit_price'])
+        elif is_conv and qty:
+            price = round(result['total'] / qty, 4)
+        else:
+            price = result['unit_price']
         
+        line_amount = round(qty * price, 2)
         row=12+index
         _write_line(invoice,row,[serial,description,result['hs_code'],qty,
-                                 unit,price,result['total']],
+                                 unit,price,line_amount],
                     (4,6,7))
         if pair['packing'] is not None:
             key=(pair['packing']['sheet'],pair['packing']['row'])
@@ -222,6 +228,11 @@ def generate_permit_document(
             cell.value = val
 
     # 1. Shipper Header
+    try:
+        from services.settings_store import get_settings
+        user_prefs = get_settings()
+    except Exception:
+        user_prefs = {}
     if shipmeta.get('supplier'):
         safe_set_cell(inv, 1, 1, shipmeta['supplier'])
         safe_set_cell(pl, 1, 1, shipmeta['supplier'])
@@ -262,13 +273,13 @@ def generate_permit_document(
         pl.cell(8, 8).number_format = '@'
 
     # Shipping Mode & Route (Bill of lading takes priority if provided)
-    mode = (bill_meta.get('shipping_mode') if bill_meta else None) or shipmeta.get('shipping_mode') or 'BY SEA'
+    mode = (bill_meta.get('shipping_mode') if bill_meta else None) or shipmeta.get('shipping_mode') or user_prefs.get('shipping_mode') or 'BY TRUCK'
     safe_set_cell(inv, 9, 2, mode)
     safe_set_cell(pl, 9, 2, mode)
 
     import re
-    orig = (bill_meta.get('origin') if bill_meta else None) or shipmeta.get('origin') or 'JIANGSU, CHINA'
-    dest = (bill_meta.get('destination') if bill_meta else None) or shipmeta.get('destination') or 'PHNOM PENH, CAMBODIA'
+    orig = (bill_meta.get('origin') if bill_meta else None) or shipmeta.get('origin') or user_prefs.get('origin') or 'JIANGSU, CHINA'
+    dest = (bill_meta.get('destination') if bill_meta else None) or shipmeta.get('destination') or user_prefs.get('destination') or 'PHNOM PENH, CAMBODIA'
     orig = re.sub(r',\s*', ', ', str(orig).strip()).upper()
     dest = re.sub(r',\s*', ', ', str(dest).strip()).upper()
     route_str = f'{orig} TO {dest}, KINGDOM OF CAMBODIA.' if 'CAMBODIA' not in dest else f'{orig} TO {dest}'
@@ -280,18 +291,41 @@ def generate_permit_document(
     safe_set_cell(pl, 11, 2, origin_country)
 
     # 3. Consignee
-    co = shipmeta.get('consignee') or cdcmeta.get('company')
+    co = shipmeta.get('consignee') or cdcmeta.get('company') or user_prefs.get('company_name')
     if co:
         safe_set_cell(inv, 12, 2, co)
         safe_set_cell(pl, 12, 2, co)
     if shipmeta.get('consignee_address'):
-        c_lines = [l.strip() for l in shipmeta['consignee_address'].split('\n') if l.strip()]
-        for idx, line in enumerate(c_lines[:3]):
+        raw_lines = [l.strip() for l in shipmeta['consignee_address'].split('\n') if l.strip()]
+        c_lines = []
+        for l in raw_lines:
+            if len(l) > 42 and ',' in l:
+                parts = [p.strip() for p in l.split(',') if p.strip()]
+                cur = ''
+                for p in parts:
+                    cand = (cur + ', ' + p).strip(', ')
+                    if len(cand) <= 45:
+                        cur = cand
+                    else:
+                        if cur:
+                            c_lines.append(cur + ',')
+                        cur = p
+                if cur:
+                    c_lines.append(cur + (',' if l.endswith(',') else ''))
+            else:
+                c_lines.append(l)
+
+        for idx, line in enumerate(c_lines[:4]):
             safe_set_cell(inv, 13 + idx, 2, line)
             safe_set_cell(pl, 13 + idx, 2, line)
 
+        vat_val = inv.cell(17, 2).value or user_prefs.get('vat_number') or 'VAT No : LO01-902303477'
+        safe_set_cell(inv, 17, 2, vat_val)
+        if pl:
+            safe_set_cell(pl, 17, 2, vat_val)
+
     # 4. QIP Reference & CDC Approval
-    qip = (qip_reference or cdcmeta.get('qip') or '211/26').strip()
+    qip = (qip_reference or cdcmeta.get('qip') or user_prefs.get('qip_reference') or '211/26').strip()
     clean_qip = qip.split('(')[0].replace('No.', '').replace('QIP', '').strip('# :')
     if not inv['J9'].value or 'KEEPNH' in str(inv['J9'].value):
         inv['J9'] = f'No. {qip}'
@@ -408,14 +442,16 @@ def generate_permit_document(
             qty = raw_qty
             is_converted = False
 
-        # 4. Unit price: calculate accurately so D * F matches total USD
+        # 4. Unit price: MUST match CDC Master List if matched, otherwise calculate/fallback
         total_usd = res.get('total')
-        if is_converted and qty > 0 and total_usd:
+        if match and match.get('unit_price') is not None:
+            price = float(match['unit_price'])
+        elif is_converted and qty > 0 and total_usd:
             price = round(total_usd / qty, 4)
             if round(round(total_usd / qty, 2) * qty, 2) == round(total_usd, 2):
                 price = round(total_usd / qty, 2)
         else:
-            price = res.get('unit_price') or 0.0
+            price = float(res.get('unit_price') or 0.0)
 
         # INV sheet line
         inv.cell(r_inv, 1, cdc_num).alignment = align_center
