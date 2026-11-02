@@ -258,6 +258,10 @@ def consolidate_permit_items(results, selections, pairs, auto_discount_kg=True, 
         nw = round(grp['nw'], 2) if grp['nw'] is not None else None
         gw = round(grp['gw'], 2) if grp['gw'] is not None else None
 
+        # Store pre-discount values for dynamic Excel formula generation
+        orig_qty_raw = total_qty
+        orig_nw_raw = nw
+
         # Auto tare discount: only for unit Kg (1 kg per package deducted from Net Weight and Invoice Quantity)
         is_kg = str(grp['unit'] or '').strip().lower() in {'kg', 'kgs', 'kilogram', 'kilograms', 'kilo', 'kilos'}
         is_discounted = False
@@ -267,6 +271,9 @@ def consolidate_permit_items(results, selections, pairs, auto_discount_kg=True, 
                 nw = max(0.0, round(float(nw) - tare_discount, 2))
             total_qty = max(0.0, float(total_qty) - tare_discount)
             is_discounted = True
+
+        orig_qty = int(orig_qty_raw) if float(orig_qty_raw).is_integer() else round(orig_qty_raw, 4)
+        orig_nw = (int(orig_nw_raw) if float(orig_nw_raw).is_integer() else round(orig_nw_raw, 2)) if orig_nw_raw is not None else None
 
         if float(total_qty).is_integer():
             total_qty = int(total_qty)
@@ -291,6 +298,9 @@ def consolidate_permit_items(results, selections, pairs, auto_discount_kg=True, 
             'pkgs': pkgs,
             'nw': nw,
             'gw': gw,
+            'orig_qty': orig_qty,
+            'orig_nw': orig_nw,
+            'discount_rate_per_pkg': float(discount_rate_per_pkg),
             'items_count': grp['items_count'],
             'is_kg_discounted': is_discounted,
         })
@@ -632,13 +642,22 @@ def generate_permit_document(
         qty = item['qty']
         unit = item['unit']
         price = item['price']
+        is_disc = item.get('is_kg_discounted', False)
 
         # INV sheet line
         inv.cell(r_inv, 1, cdc_num).alignment = align_center
         inv.cell(r_inv, 1).font = font_item
         inv.cell(r_inv, 2, desc).alignment = align_left
         inv.cell(r_inv, 2).font = font_item
-        inv.cell(r_inv, 4, qty).alignment = align_right
+
+        # Quantity on INV: if tare discount is active and PL exists, link directly to PL Net Weight Col G
+        if is_disc and pl is not None:
+            r_pl = start_row_pl + idx
+            inv_qty_val = f"='{pl.title}'!G{r_pl}"
+        else:
+            inv_qty_val = qty
+
+        inv.cell(r_inv, 4, inv_qty_val).alignment = align_right
         inv.cell(r_inv, 4).font = font_item
         inv.cell(r_inv, 4).number_format = '#,##0.00' if not float(qty).is_integer() else '#,##0'
         inv.cell(r_inv, 5, unit).alignment = align_left
@@ -661,15 +680,39 @@ def generate_permit_document(
             pl.cell(r_pl, 1).font = font_bold
             pl.cell(r_pl, 2, desc).alignment = align_left
             pl.cell(r_pl, 2).font = font_item
-            pl.cell(r_pl, 5, qty).alignment = align_right
+
+            # Quantity on PL: if tare discount is active, link directly to Net Weight `=G{r_pl}`
+            if is_disc:
+                pl_qty_val = f"=G{r_pl}"
+            else:
+                pl_qty_val = qty
+
+            pl.cell(r_pl, 5, pl_qty_val).alignment = align_right
             pl.cell(r_pl, 5).font = font_item
             pl.cell(r_pl, 5).number_format = '#,##0.00' if not float(qty).is_integer() else '#,##0'
             pl.cell(r_pl, 6, unit).alignment = align_left
             pl.cell(r_pl, 6).font = font_item
-            if nw is not None:
-                pl.cell(r_pl, 7, nw).alignment = align_right
+
+            # Net Weight on PL: if tare discount is active, insert formula `={orig_base}-A{r_pl}`
+            if is_disc and pkgs is not None:
+                orig_base = item.get('orig_nw') if item.get('orig_nw') is not None else item.get('orig_qty')
+                if orig_base is not None:
+                    base_str = str(int(orig_base)) if float(orig_base).is_integer() else str(orig_base)
+                    rate = item.get('discount_rate_per_pkg', 1.0)
+                    if rate == 1.0:
+                        pl_nw_val = f"={base_str}-A{r_pl}"
+                    else:
+                        pl_nw_val = f"={base_str}-(A{r_pl}*{rate})"
+                else:
+                    pl_nw_val = nw
+            else:
+                pl_nw_val = nw
+
+            if pl_nw_val is not None:
+                pl.cell(r_pl, 7, pl_nw_val).alignment = align_right
                 pl.cell(r_pl, 7).font = font_item
                 pl.cell(r_pl, 7).number_format = '#,##0.00'
+
             if gw is not None:
                 pl.cell(r_pl, 8, gw).alignment = align_right
                 pl.cell(r_pl, 8).font = font_item

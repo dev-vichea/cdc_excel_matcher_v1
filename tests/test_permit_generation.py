@@ -267,10 +267,10 @@ class TestPermitGeneration(unittest.TestCase):
         pl = wb['PL']
 
         # Items on INV start at row 24
-        # Row 24: CDC #1 combined & discounted
+        # Row 24: CDC #1 combined & dynamic formula linking to PL Net Weight
         self.assertEqual(inv.cell(24, 1).value, 1)
         self.assertEqual(inv.cell(24, 2).value, 'WOVEN FABRIC')
-        self.assertEqual(inv.cell(24, 4).value, 24247)  # 24,770 - 523
+        self.assertEqual(inv.cell(24, 4).value, "='PL'!G24")  # Direct formula linking to PL Net Weight
         self.assertEqual(inv.cell(24, 5).value, 'Kg')
         self.assertEqual(inv.cell(24, 6).value, 3.50)
         self.assertEqual(inv.cell(24, 7).value, '=D24*F24')
@@ -291,12 +291,12 @@ class TestPermitGeneration(unittest.TestCase):
         self.assertEqual(inv.cell(40, 7).value, '=SUM(G24:G25)')
 
         # PL sheet:
-        # Row 24: CDC #1 combined packages and discounted net weight
+        # Row 24: CDC #1 combined packages and dynamic tare discount formulas
         self.assertEqual(pl.cell(24, 1).value, 523)  # 260 + 263 packages
         self.assertEqual(pl.cell(24, 2).value, 'WOVEN FABRIC')
-        self.assertEqual(pl.cell(24, 5).value, 24247)  # discounted quantity in PL
+        self.assertEqual(pl.cell(24, 5).value, '=G24')  # Direct formula linking Quantity to Net Weight
         self.assertEqual(pl.cell(24, 6).value, 'Kg')
-        self.assertEqual(pl.cell(24, 7).value, 24247.0)  # 24,770 - 523 discounted NW
+        self.assertEqual(pl.cell(24, 7).value, '=24770-A24')  # Dynamic tare deduction formula
         self.assertEqual(pl.cell(24, 8).value, 24928.0)  # untouched GW
 
         # Row 25: CDC #5
