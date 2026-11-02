@@ -19,7 +19,7 @@ from services.translation_memory import (
 )
 from services.exporter import export_report
 from services.bill_extractor import extract_bill
-from services.permit_exporter import generate_permit_document, export_permit_draft
+from services.permit_exporter import generate_permit_document, export_permit_draft, consolidate_permit_items
 from services.cutstock_updater import (
     detect_period_columns,
     suggest_period_from_date,
@@ -773,42 +773,15 @@ with tab_permit_inv:
         tpl_badge = f"`{job.get('template_filename')}` (Custom)" if job.get('template_bytes') else "Default (`1-26TKYM164.xlsx`)"
         c_i3.caption(f"**Template:** {tpl_badge}")
 
+    consolidated_permit_items = consolidate_permit_items(results, selections, job['packing_pairs'])
     permit_inv_rows = []
     total_inv_amount = 0.0
-    sorted_permit_items = sorted(zip(results, selections, job['packing_pairs']), key=_get_item_cdc_sort_key)
-    for idx, (res, sel, pair) in enumerate(sorted_permit_items):
-        match = sel.get('match')
-        cdc_num = match.get('serial') or (match['row'] if match else (idx + 1))
-        if isinstance(cdc_num, str) and cdc_num.startswith('#'):
-            cdc_num = cdc_num[1:]
-        try:
-            if float(cdc_num).is_integer():
-                cdc_num = int(float(cdc_num))
-        except (ValueError, TypeError):
-            pass
-
-        desc = match['description'].upper() if match and match.get('description') else (res.get('english_provided') or res.get('chinese', '')).upper()
-
-        raw_qty = res.get('qty', 0.0)
-        raw_unit = res.get('unit', '')
-        if match and match.get('unit'):
-            unit = match['unit']
-            qty, is_converted = convert_unit_quantity(raw_qty, raw_unit, unit)
-        else:
-            unit = raw_unit
-            qty = raw_qty
-            is_converted = False
-
-        total_usd = float(res.get('total') or 0.0)
-        if match and match.get('unit_price') is not None:
-            price = float(match['unit_price'])
-        elif is_converted and qty > 0 and total_usd:
-            price = round(total_usd / qty, 4)
-            if round(round(total_usd / qty, 2) * qty, 2) == round(total_usd, 2):
-                price = round(total_usd / qty, 2)
-        else:
-            price = float(res.get('unit_price') or 0.0)
-
+    for idx, item in enumerate(consolidated_permit_items):
+        cdc_num = item['cdc_num']
+        desc = item['desc']
+        qty = item['qty']
+        unit = item['unit']
+        price = item['price']
         line_amount = round(qty * price, 2)
         total_inv_amount += line_amount
 
@@ -822,7 +795,8 @@ with tab_permit_inv:
         })
 
     st.dataframe(pd.DataFrame(permit_inv_rows), hide_index=True, width="stretch")
-    st.caption(f"Total Declared Value: **${total_inv_amount:,.2f} USD** | All items use official CDC uppercase descriptions and CDC units.")
+    cons_note = f" | {len(results)} items combined into {len(consolidated_permit_items)} CDC lines" if len(consolidated_permit_items) < len(results) else ""
+    st.caption(f"Total Declared Value: **${total_inv_amount:,.2f} USD**{cons_note} | All items use official CDC uppercase descriptions and CDC units.")
 
 
 # TAB 3: NEW PACKING LIST PERMIT PREVIEW
@@ -841,24 +815,13 @@ with tab_permit_pl:
     tot_nw = 0.0
     tot_gw = 0.0
 
-    sorted_permit_items = sorted(zip(results, selections, job['packing_pairs']), key=_get_item_cdc_sort_key)
-    for idx, (res, sel, pair) in enumerate(sorted_permit_items):
-        match = sel.get('match')
-        desc = match['description'].upper() if match and match.get('description') else (res.get('english_provided') or res.get('chinese', '')).upper()
-
-        raw_qty = res.get('qty', 0.0)
-        raw_unit = res.get('unit', '')
-        if match and match.get('unit'):
-            unit = match['unit']
-            qty, is_converted = convert_unit_quantity(raw_qty, raw_unit, unit)
-        else:
-            unit = raw_unit
-            qty = raw_qty
-
-        pck = pair.get('packing')
-        pkgs = pck.get('packages') if pck else (qty if str(unit).lower() in ['set', 'pcs'] else 1)
-        nw = pck.get('net_weight') if pck else None
-        gw = pck.get('gross_weight') if pck else None
+    for idx, item in enumerate(consolidated_permit_items):
+        desc = item['desc']
+        qty = item['qty']
+        unit = item['unit']
+        pkgs = item['pkgs']
+        nw = item['nw']
+        gw = item['gw']
 
         if pkgs: tot_pkgs += pkgs
         if nw: tot_nw += nw

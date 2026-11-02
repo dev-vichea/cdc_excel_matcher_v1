@@ -177,6 +177,137 @@ class TestPermitGeneration(unittest.TestCase):
         ws_d = wb_deducted['Sheet1']
         self.assertEqual(ws_d.cell(104, 14).value, 6406.0)
 
+    def test_permit_generation_same_cdc_consolidation(self):
+        """Verify that items with the same CDC No (same CDC master entry) are combined into a single permit row with summed quantity."""
+        from services.permit_exporter import consolidate_permit_items, generate_permit_document
+
+        cdc_match_1 = {
+            'serial': '1',
+            'row': 10,
+            'sheet': 'Sheet1',
+            'description': 'Woven fabric',
+            'unit': 'Kg',
+            'unit_price': 3.50,
+            'unit_compatible': True,
+        }
+        cdc_match_5 = {
+            'serial': '5',
+            'row': 15,
+            'sheet': 'Sheet1',
+            'description': 'Inter lining fabric',
+            'unit': 'Yd',
+            'unit_price': 0.25,
+            'unit_compatible': True,
+        }
+
+        results = [
+            {'row': 1, 'chinese': '全棉梭织布', 'english_provided': 'WOVEN FABRIC (100%cotton)', 'qty': 12724.0, 'unit': 'kg', 'unit_price': 3.50, 'total': 44534.0, 'hs_code': '5208'},
+            {'row': 2, 'chinese': '涤棉梭织布', 'english_provided': 'WOVEN FABRIC (67%polyester 33%cotton)', 'qty': 12046.0, 'unit': 'kg', 'unit_price': 3.50, 'total': 42161.0, 'hs_code': '5513'},
+            {'row': 3, 'chinese': '粘合衬布', 'english_provided': 'INTER LINING FABRIC (100%polyester)', 'qty': 1679.8, 'unit': 'Yd', 'unit_price': 0.25, 'total': 419.95, 'hs_code': '5903'},
+        ]
+        selections = [
+            {'match': cdc_match_1, 'decision': 'Approved', 'notes': ''},
+            {'match': cdc_match_1, 'decision': 'Approved', 'notes': ''},
+            {'match': cdc_match_5, 'decision': 'Approved', 'notes': ''},
+        ]
+        pairs = [
+            {'invoice': results[0], 'packing': {'sheet': 'PL', 'row': 1, 'packages': 100, 'net_weight': 12000.0, 'gross_weight': 12500.0}},
+            {'invoice': results[1], 'packing': {'sheet': 'PL', 'row': 2, 'packages': 80, 'net_weight': 11500.0, 'gross_weight': 11900.0}},
+            {'invoice': results[2], 'packing': {'sheet': 'PL', 'row': 3, 'packages': 10, 'net_weight': 150.0, 'gross_weight': 160.0}},
+        ]
+
+        # 1. Test consolidate_permit_items
+        consolidated = consolidate_permit_items(results, selections, pairs)
+        self.assertEqual(len(consolidated), 2)
+
+        # First consolidated item is CDC #1
+        self.assertEqual(consolidated[0]['cdc_num'], 1)
+        self.assertEqual(consolidated[0]['desc'], 'WOVEN FABRIC')
+        self.assertEqual(consolidated[0]['qty'], 24770)  # 12,724 + 12,046
+        self.assertEqual(consolidated[0]['unit'], 'Kg')
+        self.assertEqual(consolidated[0]['price'], 3.50)
+        self.assertEqual(consolidated[0]['pkgs'], 180)  # 100 + 80
+        self.assertEqual(consolidated[0]['nw'], 23500.0)  # 12000 + 11500
+        self.assertEqual(consolidated[0]['gw'], 24400.0)  # 12500 + 11900
+        self.assertEqual(consolidated[0]['items_count'], 2)
+
+        # Second consolidated item is CDC #5
+        self.assertEqual(consolidated[1]['cdc_num'], 5)
+        self.assertEqual(consolidated[1]['desc'], 'INTER LINING FABRIC')
+        self.assertEqual(consolidated[1]['qty'], 1679.8)
+        self.assertEqual(consolidated[1]['unit'], 'Yd')
+        self.assertEqual(consolidated[1]['price'], 0.25)
+        self.assertEqual(consolidated[1]['pkgs'], 10)
+        self.assertEqual(consolidated[1]['nw'], 150.0)
+        self.assertEqual(consolidated[1]['gw'], 160.0)
+        self.assertEqual(consolidated[1]['items_count'], 1)
+
+        # 2. Test generate_permit_document Excel export
+        shipmeta = {
+            'invoice_no': 'TEST-INV-001',
+            'supplier': 'SUPPLIER CO., LTD.',
+            'consignee': 'XIN CAI FU (CAMBODIA) CO., LTD.',
+            'invoice_date': '2026-11-02',
+        }
+        cdcmeta = {'company': 'XIN CAI FU', 'qip': '211/26', 'sheet': 'Sheet1'}
+
+        permit_bytes = generate_permit_document(
+            shipmeta, cdcmeta, results, selections,
+            [p['packing'] for p in pairs], pairs, [], '211/26'
+        )
+        wb = openpyxl.load_workbook(io.BytesIO(permit_bytes))
+        inv = wb['INV']
+        pl = wb['PL']
+
+        # Items on INV start at row 24
+        # Row 24: CDC #1 combined
+        self.assertEqual(inv.cell(24, 1).value, 1)
+        self.assertEqual(inv.cell(24, 2).value, 'WOVEN FABRIC')
+        self.assertEqual(inv.cell(24, 4).value, 24770)
+        self.assertEqual(inv.cell(24, 5).value, 'Kg')
+        self.assertEqual(inv.cell(24, 6).value, 3.50)
+        self.assertEqual(inv.cell(24, 7).value, '=D24*F24')
+
+        # Row 25: CDC #5
+        self.assertEqual(inv.cell(25, 1).value, 5)
+        self.assertEqual(inv.cell(25, 2).value, 'INTER LINING FABRIC')
+        self.assertEqual(inv.cell(25, 4).value, 1679.8)
+        self.assertEqual(inv.cell(25, 5).value, 'Yd')
+        self.assertEqual(inv.cell(25, 6).value, 0.25)
+        self.assertEqual(inv.cell(25, 7).value, '=D25*F25')
+
+        # Row 26: cleared
+        self.assertIsNone(inv.cell(26, 1).value)
+        self.assertIsNone(inv.cell(26, 2).value)
+
+        # Total row formula sums row 24 to 25
+        self.assertEqual(inv.cell(40, 7).value, '=SUM(G24:G25)')
+
+        # PL sheet:
+        # Row 24: CDC #1 combined packages and weights (row 23 is Category header)
+        self.assertEqual(pl.cell(24, 1).value, 180)  # 100 + 80 packages
+        self.assertEqual(pl.cell(24, 2).value, 'WOVEN FABRIC')
+        self.assertEqual(pl.cell(24, 5).value, 24770)
+        self.assertEqual(pl.cell(24, 6).value, 'Kg')
+        self.assertEqual(pl.cell(24, 7).value, 23500.0)
+        self.assertEqual(pl.cell(24, 8).value, 24400.0)
+
+        # Row 25: CDC #5
+        self.assertEqual(pl.cell(25, 1).value, 10)
+        self.assertEqual(pl.cell(25, 2).value, 'INTER LINING FABRIC')
+        self.assertEqual(pl.cell(25, 5).value, 1679.8)
+        self.assertEqual(pl.cell(25, 6).value, 'Yd')
+        self.assertEqual(pl.cell(25, 7).value, 150.0)
+        self.assertEqual(pl.cell(25, 8).value, 160.0)
+
+        # Row 26: cleared
+        self.assertIsNone(pl.cell(26, 1).value)
+
+        # PL total row formulas sum row 24 to 25
+        self.assertEqual(pl.cell(40, 1).value, '=SUM(A24:A25)')
+        self.assertEqual(pl.cell(40, 7).value, '=SUM(G24:G25)')
+        self.assertEqual(pl.cell(40, 8).value, '=SUM(H24:H25)')
+
 
 if __name__ == '__main__':
     unittest.main()

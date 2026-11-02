@@ -89,7 +89,7 @@ def _write_line(sheet,row,values,numeric_columns=()):
 
 def _cdc_sort_key(item_tuple):
     res, sel, pair = item_tuple
-    match = sel.get('match')
+    match = sel.get('match') if sel else None
     if match:
         s = str(match.get('serial') or match.get('row') or '')
         s_clean = s.lstrip('#').strip()
@@ -98,6 +98,192 @@ def _cdc_sort_key(item_tuple):
         except (ValueError, TypeError):
             return (1, 0.0, s_clean)
     return (2, 0.0, str(res.get('row', '')))
+
+
+def consolidate_permit_items(results, selections, pairs):
+    """Consolidate invoice items that share the same CDC item / CDC number.
+
+    If multiple invoice lines match the same CDC No (same CDC master entry),
+    they are consolidated into a single permit row with:
+    - Same CDC No, CDC description, CDC unit, and CDC unit price
+    - Sum of converted quantities
+    - Sum of packages, net weight, and gross weight
+    
+    Unmatched items or items with different CDC numbers remain separate.
+    Items are sorted in ascending order of CDC number.
+    """
+    from services.matching import convert_unit_quantity
+
+    pairs_list = pairs if (pairs and len(pairs) == len(results)) else [None] * len(results)
+    selections_list = selections if (selections and len(selections) == len(results)) else [{'match': None}] * len(results)
+
+    # 1. Build list with precomputed sort keys and cleaned values
+    prepared = []
+    for idx, (res, sel, pair) in enumerate(zip(results, selections_list, pairs_list)):
+        match = sel.get('match') if sel else None
+
+        # CDC ID / Item #
+        if match:
+            raw_cdc = match.get('serial') or match.get('row') or ''
+            cdc_clean = str(raw_cdc).lstrip('#').strip()
+            try:
+                if float(cdc_clean).is_integer():
+                    cdc_num = int(float(cdc_clean))
+                else:
+                    cdc_num = float(cdc_clean)
+            except (ValueError, TypeError):
+                cdc_num = cdc_clean
+            sort_val = float(cdc_clean) if isinstance(cdc_num, (int, float)) else 999999.0
+            sort_key = (0, sort_val, str(cdc_num))
+        else:
+            cdc_num = idx + 1
+            sort_key = (2, 0.0, str(res.get('row', idx)))
+
+        # Description: official CDC description (uppercase)
+        if match and match.get('description'):
+            desc = match['description'].upper()
+        else:
+            desc = (res.get('english_provided') or res.get('chinese', '')).upper()
+
+        # Unit & Quantity: converted to CDC unit if match present
+        raw_qty = float(res.get('qty') or 0.0)
+        raw_unit = str(res.get('unit') or '').strip()
+        if match and match.get('unit'):
+            unit = str(match['unit']).strip()
+            qty, is_converted = convert_unit_quantity(raw_qty, raw_unit, unit)
+        else:
+            unit = raw_unit
+            qty = raw_qty
+            is_converted = False
+
+        # Unit price & total
+        total_usd = float(res.get('total') or 0.0)
+        if match and match.get('unit_price') is not None:
+            price = float(match['unit_price'])
+        elif is_converted and qty > 0 and total_usd:
+            price = round(total_usd / qty, 4)
+            if round(round(total_usd / qty, 2) * qty, 2) == round(total_usd, 2):
+                price = round(total_usd / qty, 2)
+        else:
+            price = float(res.get('unit_price') or 0.0)
+
+        # Packing details
+        pck = pair.get('packing') if pair else None
+        pkgs = pck.get('packages') if pck else (qty if str(unit).lower() in ['set', 'pcs'] else 1)
+        nw = pck.get('net_weight') if pck else None
+        gw = pck.get('gross_weight') if pck else None
+
+        prepared.append({
+            'sort_key': sort_key,
+            'idx': idx,
+            'res': res,
+            'match': match,
+            'cdc_num': cdc_num,
+            'desc': desc,
+            'unit': unit,
+            'qty': qty,
+            'price': price,
+            'total_usd': total_usd,
+            'pck': pck,
+            'pkgs': pkgs,
+            'nw': nw,
+            'gw': gw,
+        })
+
+    # Sort in ascending order by CDC number
+    prepared.sort(key=lambda x: x['sort_key'])
+
+    # 2. Group items by CDC No (same item)
+    grouped = {}
+    for item in prepared:
+        match = item['match']
+        if match:
+            # Group by CDC serial/number and unit
+            group_key = ('CDC', str(item['cdc_num']).strip().lower(), str(item['unit']).strip().lower())
+        else:
+            group_key = ('UNMATCHED', item['idx'])
+
+        if group_key not in grouped:
+            grouped[group_key] = {
+                'cdc_num': item['cdc_num'],
+                'desc': item['desc'],
+                'unit': item['unit'],
+                'price': item['price'],
+                'match': match,
+                'qty': 0.0,
+                'total_usd': 0.0,
+                'pkgs': 0.0 if item['pkgs'] is not None else None,
+                'nw': 0.0 if item['nw'] is not None else None,
+                'gw': 0.0 if item['gw'] is not None else None,
+                'seen_packings': set(),
+                'items_count': 0,
+            }
+
+        grp = grouped[group_key]
+        grp['qty'] += float(item['qty'])
+        grp['total_usd'] += (float(item['qty']) * float(item['price']))
+        grp['items_count'] += 1
+
+        if item['pkgs'] is not None:
+            if grp['pkgs'] is None:
+                grp['pkgs'] = 0.0
+            grp['pkgs'] += float(item['pkgs'])
+
+        pck = item['pck']
+        pck_id = (pck.get('sheet'), pck.get('row')) if (pck and isinstance(pck, dict) and 'sheet' in pck and 'row' in pck) else None
+        if pck_id is None or pck_id not in grp['seen_packings']:
+            if pck_id:
+                grp['seen_packings'].add(pck_id)
+            if item['nw'] is not None:
+                if grp['nw'] is None:
+                    grp['nw'] = 0.0
+                grp['nw'] += float(item['nw'])
+            if item['gw'] is not None:
+                if grp['gw'] is None:
+                    grp['gw'] = 0.0
+                grp['gw'] += float(item['gw'])
+
+    # 3. Finalize consolidated list
+    consolidated = []
+    for grp in grouped.values():
+        total_qty = grp['qty']
+        if float(total_qty).is_integer():
+            total_qty = int(total_qty)
+        else:
+            total_qty = round(total_qty, 4)
+
+        pkgs = grp['pkgs']
+        if pkgs is not None:
+            if float(pkgs).is_integer():
+                pkgs = int(pkgs)
+            else:
+                pkgs = round(pkgs, 2)
+
+        nw = round(grp['nw'], 2) if grp['nw'] is not None else None
+        gw = round(grp['gw'], 2) if grp['gw'] is not None else None
+
+        if grp['match'] and grp['match'].get('unit_price') is not None:
+            final_price = float(grp['match']['unit_price'])
+        elif total_qty > 0 and grp['total_usd'] > 0:
+            final_price = round(grp['total_usd'] / total_qty, 4)
+            if round(round(grp['total_usd'] / total_qty, 2) * total_qty, 2) == round(grp['total_usd'], 2):
+                final_price = round(grp['total_usd'] / total_qty, 2)
+        else:
+            final_price = grp['price']
+
+        consolidated.append({
+            'cdc_num': grp['cdc_num'],
+            'desc': grp['desc'],
+            'qty': total_qty,
+            'unit': grp['unit'],
+            'price': final_price,
+            'pkgs': pkgs,
+            'nw': nw,
+            'gw': gw,
+            'items_count': grp['items_count'],
+        })
+
+    return consolidated
 
 
 def export_permit_draft(shipmeta,cdcmeta,results,selections,packing_items,pairs,packing_issues,qip_reference=''):
@@ -380,7 +566,8 @@ def generate_permit_document(
     else:
         start_row_pl, orig_total_row_pl = 23, 39
 
-    N = len(results)
+    consolidated_items = consolidate_permit_items(results, selections, pairs)
+    N = len(consolidated_items)
     capacity_inv = orig_total_row_inv - start_row_inv
     if N > capacity_inv:
         inv.insert_rows(orig_total_row_inv - 1, amount=N - capacity_inv)
@@ -410,48 +597,13 @@ def generate_permit_document(
     align_right = Alignment(horizontal='right', vertical='center')
     align_center = Alignment(horizontal='center', vertical='center')
 
-    sorted_items = sorted(zip(results, selections, pairs), key=_cdc_sort_key)
-    for idx, (res, sel, pair) in enumerate(sorted_items):
+    for idx, item in enumerate(consolidated_items):
         r_inv = start_row_inv + idx
-        match = sel.get('match')
-        # 1. CDC ID / Item #
-        cdc_num = match.get('serial') or (match['row'] if match else (idx + 1))
-        if isinstance(cdc_num, str) and cdc_num.startswith('#'):
-            cdc_num = cdc_num[1:]
-        try:
-            if float(cdc_num).is_integer():
-                cdc_num = int(float(cdc_num))
-        except (ValueError, TypeError):
-            pass
-
-        # 2. Description: MUST use the name of the CDC (in uppercase to match permit format)
-        if match and match.get('description'):
-            desc = match['description'].upper()
-        else:
-            desc = (res.get('english_provided') or res.get('chinese', '')).upper()
-
-        # 3. Unit & Quantity: MUST use the CDC unit and converted integer quantity
-        from services.matching import convert_unit_quantity
-        raw_qty = res.get('qty', 0.0)
-        raw_unit = res.get('unit', '')
-        if match and match.get('unit'):
-            unit = match['unit']
-            qty, is_converted = convert_unit_quantity(raw_qty, raw_unit, unit)
-        else:
-            unit = raw_unit
-            qty = raw_qty
-            is_converted = False
-
-        # 4. Unit price: MUST match CDC Master List if matched, otherwise calculate/fallback
-        total_usd = res.get('total')
-        if match and match.get('unit_price') is not None:
-            price = float(match['unit_price'])
-        elif is_converted and qty > 0 and total_usd:
-            price = round(total_usd / qty, 4)
-            if round(round(total_usd / qty, 2) * qty, 2) == round(total_usd, 2):
-                price = round(total_usd / qty, 2)
-        else:
-            price = float(res.get('unit_price') or 0.0)
+        cdc_num = item['cdc_num']
+        desc = item['desc']
+        qty = item['qty']
+        unit = item['unit']
+        price = item['price']
 
         # INV sheet line
         inv.cell(r_inv, 1, cdc_num).alignment = align_center
@@ -473,10 +625,9 @@ def generate_permit_document(
         # PL sheet line
         if pl:
             r_pl = start_row_pl + idx
-            pck = pair.get('packing')
-            pkgs = pck.get('packages') if pck else (qty if str(unit).lower() in ['set', 'pcs'] else 1)
-            nw = pck.get('net_weight') if pck else None
-            gw = pck.get('gross_weight') if pck else None
+            pkgs = item['pkgs']
+            nw = item['nw']
+            gw = item['gw']
 
             pl.cell(r_pl, 1, pkgs).alignment = align_center
             pl.cell(r_pl, 1).font = font_bold
@@ -496,11 +647,11 @@ def generate_permit_document(
                 pl.cell(r_pl, 8).font = font_item
                 pl.cell(r_pl, 8).number_format = '#,##0.00'
 
-    last_r_inv = start_row_inv + N - 1
+    last_r_inv = max(start_row_inv, start_row_inv + N - 1)
     # Total row formulas
     inv.cell(total_row_inv, 7, f'=SUM(G{start_row_inv}:G{last_r_inv})').number_format = '#,##0.00'
     if pl:
-        last_r_pl = start_row_pl + N - 1
+        last_r_pl = max(start_row_pl, start_row_pl + N - 1)
         pl.cell(total_row_pl, 1, f'=SUM(A{start_row_pl}:A{last_r_pl})')
         pl.cell(total_row_pl, 7, f'=SUM(G{start_row_pl}:G{last_r_pl})').number_format = '#,##0.00'
         pl.cell(total_row_pl, 8, f'=SUM(H{start_row_pl}:H{last_r_pl})').number_format = '#,##0.00'
