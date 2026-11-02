@@ -24,6 +24,8 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
     "destination": "PHNOM PENH, CAMBODIA",
     "template_filename": "permit_template_default.xlsx",
     "cdc_filename": "default_cdc_master.xlsx",
+    "auto_discount_kg": True,
+    "kg_discount_per_pkg": 1.0,
 }
 
 

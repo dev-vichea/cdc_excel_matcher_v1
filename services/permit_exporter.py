@@ -100,7 +100,7 @@ def _cdc_sort_key(item_tuple):
     return (2, 0.0, str(res.get('row', '')))
 
 
-def consolidate_permit_items(results, selections, pairs):
+def consolidate_permit_items(results, selections, pairs, auto_discount_kg=True, discount_rate_per_pkg=1.0):
     """Consolidate invoice items that share the same CDC item / CDC number.
 
     If multiple invoice lines match the same CDC No (same CDC master entry),
@@ -108,6 +108,7 @@ def consolidate_permit_items(results, selections, pairs):
     - Same CDC No, CDC description, CDC unit, and CDC unit price
     - Sum of converted quantities
     - Sum of packages, net weight, and gross weight
+    - Optional tare discount for items in Kg (1 kg per package deducted from net weight and invoice qty)
     
     Unmatched items or items with different CDC numbers remain separate.
     Items are sorted in ascending order of CDC number.
@@ -247,11 +248,6 @@ def consolidate_permit_items(results, selections, pairs):
     consolidated = []
     for grp in grouped.values():
         total_qty = grp['qty']
-        if float(total_qty).is_integer():
-            total_qty = int(total_qty)
-        else:
-            total_qty = round(total_qty, 4)
-
         pkgs = grp['pkgs']
         if pkgs is not None:
             if float(pkgs).is_integer():
@@ -261,6 +257,21 @@ def consolidate_permit_items(results, selections, pairs):
 
         nw = round(grp['nw'], 2) if grp['nw'] is not None else None
         gw = round(grp['gw'], 2) if grp['gw'] is not None else None
+
+        # Auto tare discount: only for unit Kg (1 kg per package deducted from Net Weight and Invoice Quantity)
+        is_kg = str(grp['unit'] or '').strip().lower() in {'kg', 'kgs', 'kilogram', 'kilograms', 'kilo', 'kilos'}
+        is_discounted = False
+        if auto_discount_kg and is_kg and pkgs is not None and float(pkgs) > 0:
+            tare_discount = float(pkgs) * float(discount_rate_per_pkg)
+            if nw is not None:
+                nw = max(0.0, round(float(nw) - tare_discount, 2))
+            total_qty = max(0.0, float(total_qty) - tare_discount)
+            is_discounted = True
+
+        if float(total_qty).is_integer():
+            total_qty = int(total_qty)
+        else:
+            total_qty = round(total_qty, 4)
 
         if grp['match'] and grp['match'].get('unit_price') is not None:
             final_price = float(grp['match']['unit_price'])
@@ -281,6 +292,7 @@ def consolidate_permit_items(results, selections, pairs):
             'nw': nw,
             'gw': gw,
             'items_count': grp['items_count'],
+            'is_kg_discounted': is_discounted,
         })
 
     return consolidated
@@ -372,7 +384,7 @@ def export_permit_draft(shipmeta,cdcmeta,results,selections,packing_items,pairs,
 def generate_permit_document(
     shipmeta, cdcmeta, results, selections, packing_items, pairs,
     packing_issues=None, qip_reference='', template_bytes=None,
-    bill_meta=None
+    bill_meta=None, auto_discount_kg=None, discount_rate_per_pkg=None
 ):
     """Generate official CDC Permit Application INV/PL Excel document.
     
@@ -566,7 +578,23 @@ def generate_permit_document(
     else:
         start_row_pl, orig_total_row_pl = 23, 39
 
-    consolidated_items = consolidate_permit_items(results, selections, pairs)
+    if auto_discount_kg is None:
+        try:
+            from services.settings_store import get_settings
+            s = get_settings()
+            auto_discount_kg = bool(s.get('auto_discount_kg', True))
+            discount_rate_per_pkg = float(s.get('kg_discount_per_pkg', 1.0))
+        except Exception:
+            auto_discount_kg = True
+            discount_rate_per_pkg = 1.0
+    if discount_rate_per_pkg is None:
+        discount_rate_per_pkg = 1.0
+
+    consolidated_items = consolidate_permit_items(
+        results, selections, pairs,
+        auto_discount_kg=auto_discount_kg,
+        discount_rate_per_pkg=discount_rate_per_pkg
+    )
     N = len(consolidated_items)
     capacity_inv = orig_total_row_inv - start_row_inv
     if N > capacity_inv:

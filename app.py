@@ -524,12 +524,18 @@ consolidation = consolidate_deductions(results, selections)
 clean_inv = re.sub(r'[^a-zA-Z0-9]', '_', shipmeta.get('invoice_no') or 'invoice')
 qip_input = cdcmeta.get('qip') or '211/26'
 
+app_settings = get_settings()
+auto_discount_kg = app_settings.get('auto_discount_kg', True)
+kg_discount_rate = float(app_settings.get('kg_discount_per_pkg', 1.0))
+
 permit_bytes = generate_permit_document(
     shipmeta, cdcmeta, results, selections,
     job['packingitems'], job['packing_pairs'],
     job['packing_issues'], qip_reference=qip_input,
     template_bytes=job.get('template_bytes'),
-    bill_meta=bill_meta
+    bill_meta=bill_meta,
+    auto_discount_kg=auto_discount_kg,
+    discount_rate_per_pkg=kg_discount_rate,
 )
 
 if periods:
@@ -773,7 +779,11 @@ with tab_permit_inv:
         tpl_badge = f"`{job.get('template_filename')}` (Custom)" if job.get('template_bytes') else "Default (`1-26TKYM164.xlsx`)"
         c_i3.caption(f"**Template:** {tpl_badge}")
 
-    consolidated_permit_items = consolidate_permit_items(results, selections, job['packing_pairs'])
+    consolidated_permit_items = consolidate_permit_items(
+        results, selections, job['packing_pairs'],
+        auto_discount_kg=auto_discount_kg,
+        discount_rate_per_pkg=kg_discount_rate,
+    )
     permit_inv_rows = []
     total_inv_amount = 0.0
     for idx, item in enumerate(consolidated_permit_items):
@@ -796,7 +806,9 @@ with tab_permit_inv:
 
     st.dataframe(pd.DataFrame(permit_inv_rows), hide_index=True, width="stretch")
     cons_note = f" | {len(results)} items combined into {len(consolidated_permit_items)} CDC lines" if len(consolidated_permit_items) < len(results) else ""
-    st.caption(f"Total Declared Value: **${total_inv_amount:,.2f} USD**{cons_note} | All items use official CDC uppercase descriptions and CDC units.")
+    has_discounted = any(item.get('is_kg_discounted') for item in consolidated_permit_items)
+    disc_note = f" | ⚖️ Tare discount: {kg_discount_rate:g} kg/pkg deducted for Kg items" if has_discounted else ""
+    st.caption(f"Total Declared Value: **${total_inv_amount:,.2f} USD**{cons_note}{disc_note} | All items use official CDC uppercase descriptions and CDC units.")
 
 
 # TAB 3: NEW PACKING LIST PERMIT PREVIEW
@@ -837,7 +849,7 @@ with tab_permit_pl:
         })
 
     st.dataframe(pd.DataFrame(permit_pl_rows), hide_index=True, width="stretch")
-    st.caption(f"Total Packages: **{tot_pkgs:g} pkgs** | Total Net Weight: **{tot_nw:,.1f} kg** | Total Gross Weight: **{tot_gw:,.1f} kg**")
+    st.caption(f"Total Packages: **{tot_pkgs:g} pkgs** | Total Net Weight: **{tot_nw:,.1f} kg** | Total Gross Weight: **{tot_gw:,.1f} kg**{disc_note}")
 
 # TAB 4: CUT-STOCK BREAKDOWN
 with tab_cutstock:

@@ -272,6 +272,21 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
             origin = sr_col2.text_input("Default Origin Port", value=settings.get("origin", "JIANGSU, CHINA"))
             dest = sr_col3.text_input("Default Destination Port", value=settings.get("destination", "PHNOM PENH, CAMBODIA"))
 
+            st.markdown("##### ⚖️ Customs Tare Deduction (Fabric in Kg)")
+            td_col1, td_col2 = st.columns([2, 1])
+            auto_disc_val = td_col1.checkbox(
+                "Auto-discount tare weight for items in Kg",
+                value=settings.get("auto_discount_kg", True),
+                help="Automatically deducts 1 kg per package/roll from Net Weight (PL) and Quantity (INV & PL) for fabric items measured in Kg."
+            )
+            tare_rate_val = td_col2.number_input(
+                "Deduction per package (kg)",
+                min_value=0.0,
+                max_value=10.0,
+                value=float(settings.get("kg_discount_per_pkg", 1.0)),
+                step=0.5
+            )
+
             saved_pref = st.form_submit_button("💾 Save Company & Shipping Preferences", type="primary")
 
         if saved_pref:
@@ -287,6 +302,8 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
                 "destination": dest.strip(),
                 "template_filename": settings.get("template_filename", "permit_template_default.xlsx"),
                 "cdc_filename": settings.get("cdc_filename", "default_cdc_master.xlsx"),
+                "auto_discount_kg": bool(auto_disc_val),
+                "kg_discount_per_pkg": float(tare_rate_val),
             }
             save_settings(updated)
             st.toast("Company & Shipping Preferences saved!", icon="💾")

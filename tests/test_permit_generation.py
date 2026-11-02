@@ -70,7 +70,7 @@ class TestPermitGeneration(unittest.TestCase):
 
         permit_bytes = generate_permit_document(
             smeta, cmeta, results, selections, pitems, pairs, issues, '211/26',
-            bill_meta=bill_meta
+            bill_meta=bill_meta, auto_discount_kg=False
         )
         wb_permit = openpyxl.load_workbook(io.BytesIO(permit_bytes))
         self.assertIn('INV', wb_permit.sheetnames)
@@ -211,38 +211,44 @@ class TestPermitGeneration(unittest.TestCase):
             {'match': cdc_match_5, 'decision': 'Approved', 'notes': ''},
         ]
         pairs = [
-            {'invoice': results[0], 'packing': {'sheet': 'PL', 'row': 1, 'packages': 100, 'net_weight': 12000.0, 'gross_weight': 12500.0}},
-            {'invoice': results[1], 'packing': {'sheet': 'PL', 'row': 2, 'packages': 80, 'net_weight': 11500.0, 'gross_weight': 11900.0}},
-            {'invoice': results[2], 'packing': {'sheet': 'PL', 'row': 3, 'packages': 10, 'net_weight': 150.0, 'gross_weight': 160.0}},
+            {'invoice': results[0], 'packing': {'sheet': 'PL', 'row': 1, 'packages': 260, 'net_weight': 12724.0, 'gross_weight': 12800.0}},
+            {'invoice': results[1], 'packing': {'sheet': 'PL', 'row': 2, 'packages': 263, 'net_weight': 12046.0, 'gross_weight': 12128.0}},
+            {'invoice': results[2], 'packing': {'sheet': 'PL', 'row': 3, 'packages': 8, 'net_weight': 185.0, 'gross_weight': 189.0}},
         ]
 
-        # 1. Test consolidate_permit_items
-        consolidated = consolidate_permit_items(results, selections, pairs)
+        # 1. Test consolidate_permit_items with auto_discount_kg=True (1 kg per package tare deduction)
+        consolidated = consolidate_permit_items(results, selections, pairs, auto_discount_kg=True)
         self.assertEqual(len(consolidated), 2)
 
-        # First consolidated item is CDC #1
+        # First consolidated item is CDC #1:
+        # Original: qty=24,770, pkgs=523, nw=24,770.00, gw=24,928.00
+        # Auto-discount for unit Kg: -523 kg tare (1 kg per package)
+        # Result: qty=24,247, nw=24,247.00
         self.assertEqual(consolidated[0]['cdc_num'], 1)
         self.assertEqual(consolidated[0]['desc'], 'WOVEN FABRIC')
-        self.assertEqual(consolidated[0]['qty'], 24770)  # 12,724 + 12,046
+        self.assertEqual(consolidated[0]['qty'], 24247)  # 24,770 - 523
         self.assertEqual(consolidated[0]['unit'], 'Kg')
         self.assertEqual(consolidated[0]['price'], 3.50)
-        self.assertEqual(consolidated[0]['pkgs'], 180)  # 100 + 80
-        self.assertEqual(consolidated[0]['nw'], 23500.0)  # 12000 + 11500
-        self.assertEqual(consolidated[0]['gw'], 24400.0)  # 12500 + 11900
+        self.assertEqual(consolidated[0]['pkgs'], 523)  # 260 + 263
+        self.assertEqual(consolidated[0]['nw'], 24247.00)  # 24,770.00 - 523
+        self.assertEqual(consolidated[0]['gw'], 24928.00)  # Gross weight untouched
         self.assertEqual(consolidated[0]['items_count'], 2)
+        self.assertTrue(consolidated[0]['is_kg_discounted'])
 
-        # Second consolidated item is CDC #5
+        # Second consolidated item is CDC #5 (unit Yd):
+        # Unit is not Kg, so no discount is deducted!
         self.assertEqual(consolidated[1]['cdc_num'], 5)
         self.assertEqual(consolidated[1]['desc'], 'INTER LINING FABRIC')
         self.assertEqual(consolidated[1]['qty'], 1679.8)
         self.assertEqual(consolidated[1]['unit'], 'Yd')
         self.assertEqual(consolidated[1]['price'], 0.25)
-        self.assertEqual(consolidated[1]['pkgs'], 10)
-        self.assertEqual(consolidated[1]['nw'], 150.0)
-        self.assertEqual(consolidated[1]['gw'], 160.0)
+        self.assertEqual(consolidated[1]['pkgs'], 8)
+        self.assertEqual(consolidated[1]['nw'], 185.0)
+        self.assertEqual(consolidated[1]['gw'], 189.0)
         self.assertEqual(consolidated[1]['items_count'], 1)
+        self.assertFalse(consolidated[1]['is_kg_discounted'])
 
-        # 2. Test generate_permit_document Excel export
+        # 2. Test generate_permit_document Excel export (with auto_discount_kg=True)
         shipmeta = {
             'invoice_no': 'TEST-INV-001',
             'supplier': 'SUPPLIER CO., LTD.',
@@ -253,17 +259,18 @@ class TestPermitGeneration(unittest.TestCase):
 
         permit_bytes = generate_permit_document(
             shipmeta, cdcmeta, results, selections,
-            [p['packing'] for p in pairs], pairs, [], '211/26'
+            [p['packing'] for p in pairs], pairs, [], '211/26',
+            auto_discount_kg=True
         )
         wb = openpyxl.load_workbook(io.BytesIO(permit_bytes))
         inv = wb['INV']
         pl = wb['PL']
 
         # Items on INV start at row 24
-        # Row 24: CDC #1 combined
+        # Row 24: CDC #1 combined & discounted
         self.assertEqual(inv.cell(24, 1).value, 1)
         self.assertEqual(inv.cell(24, 2).value, 'WOVEN FABRIC')
-        self.assertEqual(inv.cell(24, 4).value, 24770)
+        self.assertEqual(inv.cell(24, 4).value, 24247)  # 24,770 - 523
         self.assertEqual(inv.cell(24, 5).value, 'Kg')
         self.assertEqual(inv.cell(24, 6).value, 3.50)
         self.assertEqual(inv.cell(24, 7).value, '=D24*F24')
@@ -284,21 +291,21 @@ class TestPermitGeneration(unittest.TestCase):
         self.assertEqual(inv.cell(40, 7).value, '=SUM(G24:G25)')
 
         # PL sheet:
-        # Row 24: CDC #1 combined packages and weights (row 23 is Category header)
-        self.assertEqual(pl.cell(24, 1).value, 180)  # 100 + 80 packages
+        # Row 24: CDC #1 combined packages and discounted net weight
+        self.assertEqual(pl.cell(24, 1).value, 523)  # 260 + 263 packages
         self.assertEqual(pl.cell(24, 2).value, 'WOVEN FABRIC')
-        self.assertEqual(pl.cell(24, 5).value, 24770)
+        self.assertEqual(pl.cell(24, 5).value, 24247)  # discounted quantity in PL
         self.assertEqual(pl.cell(24, 6).value, 'Kg')
-        self.assertEqual(pl.cell(24, 7).value, 23500.0)
-        self.assertEqual(pl.cell(24, 8).value, 24400.0)
+        self.assertEqual(pl.cell(24, 7).value, 24247.0)  # 24,770 - 523 discounted NW
+        self.assertEqual(pl.cell(24, 8).value, 24928.0)  # untouched GW
 
         # Row 25: CDC #5
-        self.assertEqual(pl.cell(25, 1).value, 10)
+        self.assertEqual(pl.cell(25, 1).value, 8)
         self.assertEqual(pl.cell(25, 2).value, 'INTER LINING FABRIC')
         self.assertEqual(pl.cell(25, 5).value, 1679.8)
         self.assertEqual(pl.cell(25, 6).value, 'Yd')
-        self.assertEqual(pl.cell(25, 7).value, 150.0)
-        self.assertEqual(pl.cell(25, 8).value, 160.0)
+        self.assertEqual(pl.cell(25, 7).value, 185.0)
+        self.assertEqual(pl.cell(25, 8).value, 189.0)
 
         # Row 26: cleared
         self.assertIsNone(pl.cell(26, 1).value)
