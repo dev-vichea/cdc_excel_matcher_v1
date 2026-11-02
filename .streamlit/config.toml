@@ -1,6 +1,55 @@
+# CDC Import & Cut-Stock Manager — custom theme
+# Clean professional look with dark sidebar for contrast
+
 [theme]
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseFontSize = 14
+baseFontWeight = 400
+headingFontSizes = ["28px", "22px", "18px", "16px", "14px", "13px"]
+headingFontWeights = [600, 600, 600, 500, 500, 500]
+baseRadius = "8px"
+buttonRadius = "8px"
+showWidgetBorder = true
+showSidebarBorder = true
+linkUnderline = false
+paddingTop = "1.5rem"
+paddingBottom = "2rem"
+
+# Main area — light and clean
+base = "light"
 primaryColor = "#1e40af"
 backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f8fafc"
 textColor = "#0f172a"
-font = "sans serif"
+borderColor = "#e2e8f0"
+codeBackgroundColor = "#f1f5f9"
+codeTextColor = "#1e293b"
+linkColor = "#1e40af"
+
+# Palette
+blueColor = "#2563eb"
+greenColor = "#16a34a"
+redColor = "#dc2626"
+yellowColor = "#ca8a04"
+orangeColor = "#ea580c"
+violetColor = "#7c3aed"
+grayColor = "#64748b"
+
+# Dataframe styling
+dataframeBorderColor = "#e2e8f0"
+dataframeHeaderBackgroundColor = "#f1f5f9"
+dataframeHeaderTextColor = "#334155"
+
+chartCategoricalColors = ["#1e40af", "#16a34a", "#dc2626", "#ca8a04", "#7c3aed", "#ea580c", "#64748b"]
+
+# Dark sidebar for contrast
+[theme.sidebar]
+backgroundColor = "#0f172a"
+secondaryBackgroundColor = "#1e293b"
+codeBackgroundColor = "#1e293b"
+textColor = "#e2e8f0"
+borderColor = "#334155"
+primaryColor = "#3b82f6"
+linkColor = "#93c5fd"
+paddingTop = "1rem"

@@ -24,21 +24,21 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
     """Render the Settings & Master Data preferences dashboard."""
     settings = get_settings()
 
-    st.title("⚙️ Settings & Master Data Preferences")
+    st.title(" Settings & Master Data Preferences")
     st.caption("Manage permanent default templates, CDC Master List quotas, company credentials, and track historical shipment registers.")
 
     tab_cdc, tab_tpl, tab_company, tab_shipments = st.tabs([
-        "📊 CDC Master List & Quotas",
-        "📄 Default Templates (INV / PKL)",
-        "🏢 Company & Shipping Defaults",
-        "📦 Shipment Register"
+        " CDC Master List & Quotas",
+        " Default Templates (INV / PKL)",
+        " Company & Shipping Defaults",
+        " Shipment Register"
     ])
 
     # =========================================================================
     # TAB 1: CDC MASTER LIST & QUOTA OVERVIEW
     # =========================================================================
     with tab_cdc:
-        st.markdown("### 📊 CDC Master List Setup & Overview")
+        st.markdown("###  CDC Master List Setup & Overview")
         st.caption("Configure the active default CDC Master List file and review approved customs duty exemption quotas.")
 
         cdc_path = get_default_cdc_path()
@@ -59,17 +59,17 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
             b_c1, b_c2 = st.columns([1, 2], vertical_alignment="center")
             with b_c1:
                 st.download_button(
-                    "📥 Download Active Master List (.xlsx)",
+                    " Download Active Master List (.xlsx)",
                     data=cdc_bytes,
                     file_name=cdc_path.name,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     width="stretch"
                 )
             with b_c2:
-                st.caption(f"📍 Stored at: `{cdc_path.relative_to(project_root)}`")
+                st.caption(f" Stored at: `{cdc_path.relative_to(project_root)}`")
 
         # 2. Uploader to replace Default Master List
-        with st.expander("📤 Upload & Set New Default CDC Master List (.xlsx)", expanded=False):
+        with st.expander(" Upload & Set New Default CDC Master List (.xlsx)", expanded=False):
             st.caption("Upload a new official CDC Master List (.xlsx) to permanently replace the default master quota database.")
             uploaded_cdc = st.file_uploader(
                 "Upload CDC Master List (.xlsx)",
@@ -84,10 +84,10 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
                     if not test_items:
                         st.error("No valid CDC quota items found in uploaded file. Please check worksheet structure.")
                     else:
-                        st.success(f"✓ Valid CDC Master List detected! Found {len(test_items)} items for '{test_meta.get('company') or 'Registered Company'}'.")
-                        if st.button("💾 Save as Permanent Default CDC Master List", type="primary"):
+                        st.success(f" Valid CDC Master List detected! Found {len(test_items)} items for '{test_meta.get('company') or 'Registered Company'}'.")
+                        if st.button(" Save as Permanent Default CDC Master List", type="primary"):
                             save_default_cdc(new_bytes, uploaded_cdc.name)
-                            st.toast("CDC Master List updated successfully!", icon="✅")
+                            st.toast("CDC Master List updated successfully!", icon="")
                             st.rerun()
                 except Exception as exc:
                     st.error(f"Error inspecting file: {exc}")
@@ -95,7 +95,7 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
         st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
         # 3. Overview Table of CDC Items
-        st.markdown("#### 📋 Complete CDC Master Quota List")
+        st.markdown("####  Complete CDC Master Quota List")
         if not cdcitems:
             st.warning("No CDC items loaded in current master list.")
         else:
@@ -103,7 +103,7 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
             with filter_c1:
                 search_query = st.text_input(
                     "Search items",
-                    placeholder="🔍 Search by item name, CDC #, or unit...",
+                    placeholder=" Search by item name, CDC #, or unit...",
                     label_visibility="collapsed",
                     key="cdc_search_query"
                 ).strip().lower()
@@ -156,7 +156,7 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
     # TAB 2: DEFAULT PERMIT TEMPLATES (INV / PKL)
     # =========================================================================
     with tab_tpl:
-        st.markdown("### 📄 Default Permit Application Template (INV / PL)")
+        st.markdown("###  Default Permit Application Template (INV / PL)")
         st.caption("Inspect and manage the official 2-sheet customs permit template used to generate compliant INV and PL Excel files.")
 
         tpl_path = get_default_template_path()
@@ -172,17 +172,17 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
             b_t1, b_t2 = st.columns([1, 2], vertical_alignment="center")
             with b_t1:
                 st.download_button(
-                    "📥 Download Default Template (.xlsx)",
+                    " Download Default Template (.xlsx)",
                     data=tpl_bytes,
                     file_name=tpl_path.name,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     width="stretch"
                 )
             with b_t2:
-                st.caption(f"📍 Active path: `{tpl_path.relative_to(project_root)}`")
+                st.caption(f" Active path: `{tpl_path.relative_to(project_root)}`")
 
         # 2. Upload New Template
-        with st.expander("📤 Upload & Set New Default Template (.xlsx)", expanded=False):
+        with st.expander(" Upload & Set New Default Template (.xlsx)", expanded=False):
             st.caption("Upload a customized Permit Application workbook (.xlsx). Must contain an **INV** sheet and a **PL** sheet.")
             uploaded_tpl = st.file_uploader(
                 "Upload Permit Template (.xlsx)",
@@ -201,10 +201,10 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
                     if not has_inv or not has_pl:
                         st.error(f"Workbook missing required sheets. Found: {wb.sheetnames}. Must include both INV and PL.")
                     else:
-                        st.success(f"✓ Valid 2-sheet permit template detected! Sheets found: `{wb.sheetnames}`.")
-                        if st.button("💾 Set as Permanent Default Template", type="primary"):
+                        st.success(f" Valid 2-sheet permit template detected! Sheets found: `{wb.sheetnames}`.")
+                        if st.button(" Set as Permanent Default Template", type="primary"):
                             save_default_template(tpl_new_bytes, uploaded_tpl.name)
-                            st.toast("Default permit template updated successfully!", icon="✅")
+                            st.toast("Default permit template updated successfully!", icon="")
                             st.rerun()
                 except Exception as exc:
                     st.error(f"Error inspecting template: {exc}")
@@ -212,7 +212,7 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
         st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
         # 3. Layout Structure Guide
-        st.markdown("#### 📐 Standard Permit Layout Reference")
+        st.markdown("####  Standard Permit Layout Reference")
         with st.container(border=True):
             l_col1, l_col2 = st.columns(2)
             with l_col1:
@@ -247,23 +247,23 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
     # TAB 3: COMPANY & SHIPPING DEFAULTS
     # =========================================================================
     with tab_company:
-        st.markdown("### 🏢 Company & Shipping Preferences")
+        st.markdown("###  Company & Shipping Preferences")
         st.caption("Set default values used to auto-populate permit applications when not specified in shipping documents.")
 
         with st.form("company_defaults_form"):
-            st.markdown("##### 🏛️ Company Registration & Tax")
+            st.markdown("#####  Company Registration & Tax")
             cf_col1, cf_col2, cf_col3 = st.columns(3)
             company_name = cf_col1.text_input("Registered Company Name", value=settings.get("company_name", ""))
             qip_ref = cf_col2.text_input("QIP File Reference", value=settings.get("qip_reference", "211/26"))
             vat_no = cf_col3.text_input("Tax / VAT Number", value=settings.get("vat_number", "LO01-902303477"))
 
-            st.markdown("##### 📍 Consignee Address (2-Line Permit Format)")
+            st.markdown("#####  Consignee Address (2-Line Permit Format)")
             addr_col1, addr_col2 = st.columns(2)
             addr_1 = addr_col1.text_input("Address Line 1 (Sangkat / Commune)", value=settings.get("consignee_address_1", "PHUM DOMNAK TROYEOUNG, SANGKAT CHOM CHAO II,"))
             addr_2 = addr_col2.text_input("Address Line 2 (Khan / City)", value=settings.get("consignee_address_2", "KHAN POR SEN CHEY PHNOM PENH,"))
             addr_3 = st.text_input("Country Line", value=settings.get("consignee_address_3", "KINGDOM OF CAMBODIA."))
 
-            st.markdown("##### 🚢 Default Shipping & Route")
+            st.markdown("#####  Default Shipping & Route")
             sr_col1, sr_col2, sr_col3 = st.columns(3)
             modes = ["BY TRUCK", "BY SEA", "BY AIR"]
             cur_mode = settings.get("shipping_mode", "BY TRUCK")
@@ -272,7 +272,7 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
             origin = sr_col2.text_input("Default Origin Port", value=settings.get("origin", "JIANGSU, CHINA"))
             dest = sr_col3.text_input("Default Destination Port", value=settings.get("destination", "PHNOM PENH, CAMBODIA"))
 
-            st.markdown("##### ⚖️ Customs Tare Deduction (Fabric in Kg)")
+            st.markdown("#####  Customs Tare Deduction (Fabric in Kg)")
             td_col1, td_col2 = st.columns([2, 1])
             auto_disc_val = td_col1.checkbox(
                 "Auto-discount tare weight for items in Kg",
@@ -287,7 +287,7 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
                 step=0.5
             )
 
-            saved_pref = st.form_submit_button("💾 Save Company & Shipping Preferences", type="primary")
+            saved_pref = st.form_submit_button(" Save Company & Shipping Preferences", type="primary")
 
         if saved_pref:
             updated = {
@@ -306,20 +306,20 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
                 "kg_discount_per_pkg": float(tare_rate_val),
             }
             save_settings(updated)
-            st.toast("Company & Shipping Preferences saved!", icon="💾")
-            st.success("✓ Preferences saved successfully. All future permit generations will adopt these defaults.")
+            st.toast("Company & Shipping Preferences saved!", icon="")
+            st.success(" Preferences saved successfully. All future permit generations will adopt these defaults.")
 
     # =========================================================================
     # TAB 4: SHIPMENT REGISTER (HISTORICAL TRACKER)
     # =========================================================================
     with tab_shipments:
-        st.markdown("### 📦 Shipment Register")
+        st.markdown("###  Shipment Register")
         st.caption("Internal record tracking for documents, forwarder transport, and milestones across imports and exports.")
 
         database = project_root / "data" / "shipping.sqlite3"
         seed_tk164(database, project_root)
 
-        with st.expander("➕ Create New Shipment Record", expanded=False):
+        with st.expander(" Create New Shipment Record", expanded=False):
             with st.form("create_shipment_form", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
                 c_name = c1.text_input("Company", value=settings.get("company_name", "XIN CAI FU (CAMBODIA) CO., LTD."))
@@ -331,7 +331,7 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
                 try:
                     shipment_id = create_shipment(database, c_name, direction, reference, partner=partner)
                     st.session_state["selected_shipment_id"] = shipment_id
-                    st.toast("Shipment record created!", icon="📦")
+                    st.toast("Shipment record created!", icon="")
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
@@ -405,11 +405,11 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
                     destination=dest_val.strip(), forwarder=fwd_val.strip(),
                     etd=etd, eta_port=eta_port, eta_factory=eta_factory, notes=notes.strip()
                 )
-                st.toast("Shipment updated successfully!", icon="✅")
+                st.toast("Shipment updated successfully!", icon="")
             except ValueError as exc:
                 st.error(f"Check the dates and fields: {exc}")
 
-        st.markdown("##### 📁 Attached Documents")
+        st.markdown("#####  Attached Documents")
         documents = list_documents(database, selection)
         checklist = IMPORT_DOCUMENTS if shipment["direction"] == "Import" else EXPORT_DOCUMENTS
         rows = []
@@ -436,7 +436,7 @@ def render_settings_workspace(project_root: Path, lang: str = "en") -> None:
             else:
                 try:
                     save_uploaded_document(database, project_root, selection, kind, upload.name, upload.getvalue())
-                    st.toast("Document attached successfully!", icon="📎")
+                    st.toast("Document attached successfully!", icon="")
                     st.rerun()
                 except (OSError, ValueError) as exc:
                     st.error(str(exc))
