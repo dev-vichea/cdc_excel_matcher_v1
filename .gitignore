@@ -3,3 +3,9 @@
 /data/shipping.sqlite3-shm
 /data/shipping.sqlite3-wal
 /data/shipping_uploads/
+
+# Desktop build artifacts
+build/
+dist/
+__pycache__/
+*.pyc
