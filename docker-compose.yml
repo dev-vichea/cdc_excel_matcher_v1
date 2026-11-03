@@ -1,0 +1,20 @@
+services:
+  cdc-matcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cdc-excel-matcher:latest
+    container_name: cdc-excel-matcher
+    ports:
+      - "8501:8501"
+    volumes:
+      # Persist SQLite databases, settings, and file uploads across container restarts
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+

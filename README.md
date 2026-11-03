@@ -24,7 +24,34 @@ Use **Create shipment** for any import or export, then record transport details,
 
 Choose **CDC matcher** in the sidebar for the existing invoice/packing and CDC review tool.
 
-## Installation (Windows / macOS)
+## Run with Docker (Recommended — Easiest)
+
+Run the entire application in Docker with persistent storage and automatic browser launch:
+
+```bash
+./run_docker.sh
+```
+
+Or using standard Docker Compose commands:
+
+```bash
+# Start in background
+docker compose up -d
+
+# View real-time logs
+docker compose logs -f
+
+# Stop application
+./stop_docker.sh
+# or: docker compose down
+```
+
+Access the web interface at **http://localhost:8501**.
+
+> [!NOTE]
+> All database records (`data/shipping.sqlite3`), translations (`data/verified_translations.sqlite3`), settings, and file uploads are mounted from the host `./data` directory, persisting seamlessly across restarts.
+
+## Installation (Windows / macOS without Docker)
 
 Install Python 3.10+ and open a terminal in the unzipped project folder.
 

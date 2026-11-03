@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+
+# Virtual environment & caches
+.venv
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Packaging & builds
+dist/
+build/
+*.spec
+build_mac.sh
+build_windows.bat
+
+# IDE and agent metadata
+.claude/
+.agents/
+.idea/
+.vscode/
+
+# Temporary / testing
+scratch/
+tests/
+
