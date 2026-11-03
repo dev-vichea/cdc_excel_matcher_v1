@@ -466,94 +466,186 @@ def format_quantity(val):
         return "—"
     try:
         f = float(val)
-        return f"{int(f):,}" if f.is_integer() else f"{f:,.2f}"
+        return f"{int(f):,}" if f.is_integer() else f"{f:,.2f}".rstrip('0').rstrip('.')
     except (ValueError, TypeError):
         return str(val)
 
 
+def _get_item_cdc_sort_key(item_tuple):
+    if len(item_tuple) == 3:
+        res, sel, pair = item_tuple
+    else:
+        index, res = item_tuple
+        sel = selections[index]
+    match = sel.get('match')
+    if match:
+        s = str(match.get('serial') or match.get('row') or '')
+        s_clean = s.lstrip('#').strip()
+        try:
+            return (0, float(s_clean), s_clean)
+        except (ValueError, TypeError):
+            return (1, 0.0, s_clean)
+    return (2, 0.0, str(res.get('row', '')))
+
+
 # ── The 5 core workspace tabs ─────────────────────────────────
 tab_items, tab_permit_inv, tab_permit_pl, tab_cutstock, tab_audit = st.tabs([
-    t("tab_items", lang),
+    t("tab_matching", lang),
     t("tab_permit_inv", lang),
     t("tab_permit_pl", lang),
     t("tab_cutstock", lang),
     t("tab_audit", lang),
 ])
 
-# TAB 1: REVIEW CDC MATCHES
+# TAB 1: REVIEW CDC MATCHES (EASY-TO-UNDERSTAND TABLE)
 with tab_items:
-    st.caption("Review each supplier invoice item. Select the best approved CDC Master List candidate or verify auto-matches.")
-    for index, r in enumerate(results):
-        candidates = r["candidates"]
+    col_m1, col_m2 = st.columns([3, 1], vertical_alignment="center")
+    col_m1.caption(t('matching_hint', lang))
+    if col_m2.button(t('accept_all_btn', lang), icon=":material/done_all:", width="stretch"):
+        for index, r in enumerate(results):
+            if r['candidates']:
+                st.session_state[f'pick_{serial}_{index}'] = (r['candidates'][0]['sheet'], r['candidates'][0]['row'])
+                st.session_state[f'dec_{serial}_{index}'] = 'Approved'
+        st.rerun()
+
+    # ====================================================
+    # 1. OVERVIEW MATCHING TABLE (SUMMARY DATAFRAME)
+    # ====================================================
+    overview_table = []
+    has_any_converted = False
+    sorted_items = sorted(enumerate(results), key=_get_item_cdc_sort_key)
+    for index, r in sorted_items:
         sel = selections[index]
-        match = sel["match"]
-        saved_decision = sel["decision"]
+        match = sel.get('match')
+        raw_qty = r.get('qty')
+        raw_unit = r.get('unit', '')
 
-        with st.container(border=True):
-            r_head, r_val, r_stat = st.columns([5, 3, 2], vertical_alignment="center")
-            with r_head:
-                badge = f"#{r['row']}"
-                st.markdown(f"**Item {badge}:** `{r['chinese']}`")
-                if r.get("english_provided"):
-                    st.caption(f"Invoice English: *{r['english_provided']}*")
-            with r_val:
-                qty_str = format_quantity(r['qty'])
-                unit_str = r.get('unit') or ''
-                price_str = f"@ ${r['unit_price']:,.2f}" if r.get('unit_price') is not None else ''
-                tot_str = f"= **${r['total']:,.2f}**" if r.get('total') is not None else ''
-                st.markdown(f"{qty_str} {unit_str} {price_str} {tot_str}")
-            with r_stat:
-                if match:
-                    st.markdown(f":green-badge[:material/check_circle: CDC #{match.get('serial') or match['row']}]")
-                else:
-                    st.markdown(":red-badge[:material/warning: Unmatched]")
+        if match and match.get('unit'):
+            cdc_unit = match['unit']
+            cdc_qty, is_converted = convert_unit_quantity(raw_qty, raw_unit, cdc_unit)
+        else:
+            cdc_unit = '—'
+            cdc_qty = raw_qty
+            is_converted = False
 
-            # Editing row & Candidate selector
-            c_cand, c_trans = st.columns([6, 4])
-            with c_cand:
-                cand_options = []
-                for c in candidates:
-                    sn = c.get("serial") or c["row"]
-                    cand_options.append((c["sheet"], c["row"]))
+        if is_converted:
+            has_any_converted = True
+            status_text = t('status_converted', lang)
+        else:
+            status_text = t('status_match', lang) if match else t('status_unmatched', lang)
 
-                def get_cand_label(key_tuple):
-                    c = next((x for x in candidates if (x["sheet"], x["row"]) == key_tuple), None)
-                    if not c:
-                        return "Select a CDC match..."
-                    sn = c.get("serial") or c["row"]
-                    desc = c.get("description", "")[:45]
-                    score = f"{c.get('score', 0):.0%}"
-                    unit = c.get("unit", "")
-                    rem = f"Bal: {c.get('remaining', c.get('approved', '—'))}"
-                    return f"#{sn} {desc} [{unit}] ({score} match · {rem})"
+        if match:
+            raw_s = str(match.get('serial') or match['row'])
+            cdc_no = raw_s.lstrip('#').strip()
+        else:
+            cdc_no = '—'
+        orig_desc = r['chinese'] or r['english_provided'] or '—'
+        cdc_desc = match['description'] if match else 'No Match'
 
-                current_key = (match["sheet"], match["row"]) if match else (cand_options[0] if cand_options else None)
-                idx = cand_options.index(current_key) if current_key in cand_options else 0
-                if cand_options:
-                    chosen_key = st.selectbox(
-                        "CDC Master Candidate",
-                        options=cand_options,
-                        index=idx,
-                        format_func=get_cand_label,
-                        key=f"pick_{serial}_{index}",
-                        label_visibility="collapsed",
-                    )
-                else:
-                    st.caption("No suitable CDC candidates found.")
+        th_price_val = match['unit_price'] if match and match.get('unit_price') is not None else r.get('unit_price')
+        overview_table.append({
+            t('th_cdc_no', lang): cdc_no,
+            t('th_orig_desc', lang): orig_desc,
+            t('th_cdc_desc', lang): cdc_desc,
+            t('th_qty', lang): format_quantity(cdc_qty),
+            t('th_orig_unit', lang): raw_unit or '—',
+            t('th_cdc_unit', lang): cdc_unit,
+            t('th_price', lang): f"${th_price_val:,.2f}" if th_price_val is not None else '—',
+            t('th_status', lang): status_text,
+        })
+    st.dataframe(pd.DataFrame(overview_table), hide_index=True, width="stretch")
 
-            with c_trans:
+    st.space("small")
+
+    # ====================================================
+    # 2. INTERACTIVE FINE-TUNING GRID (EDIT & SELECT)
+    # ====================================================
+    with st.expander(":material/tune: Assign CDC Quota & Fine-Tune", expanded=False):
+        st.caption("Click on any dropdown in the **Assign CDC Quota** column to select a different quota match, or click the tune icon to adjust search keywords.")
+
+        col_w = [0.8, 3.2, 1.2, 3.8, 1.2, 1.0, 1.0, 0.6]
+        h_cols = st.columns(col_w, vertical_alignment="center")
+        h_cols[0].markdown("**CDC #**")
+        h_cols[1].markdown("**Invoice Item**")
+        h_cols[2].markdown("**Inv Qty**")
+        h_cols[3].markdown("**Assign CDC Quota**")
+        h_cols[4].markdown("**CDC Qty**")
+        h_cols[5].markdown("**Unit Price**")
+        h_cols[6].markdown("**Status**")
+        h_cols[7].markdown("")
+
+        st.divider()
+
+        for index, r in sorted_items:
+            sel = selections[index]
+            match = sel.get('match')
+            raw_qty = r.get('qty')
+            raw_unit = r.get('unit', '')
+
+            if match and match.get('unit'):
+                cdc_unit = match['unit']
+                cdc_qty, is_converted = convert_unit_quantity(raw_qty, raw_unit, cdc_unit)
+            else:
+                cdc_unit = '—'
+                cdc_qty = raw_qty
+                is_converted = False
+
+            if match:
+                raw_s = str(match.get('serial') or match['row'])
+                cdc_no = raw_s.lstrip('#').strip()
+            else:
+                cdc_no = f"L{r['row']}"
+
+            orig_desc = r['chinese'] or r['english_provided'] or f"Item {r['row']}"
+            th_price_val = match['unit_price'] if match and match.get('unit_price') is not None else r.get('unit_price')
+
+            candidates = r['candidates']
+            top_score = candidates[0]['score'] if candidates else 0
+
+            candidate_ids = [None] + [(x['sheet'], x['row']) for x in candidates]
+            option_names = {None: '— Unmatched'}
+            option_names.update({
+                (x['sheet'], x['row']): f"#{x.get('serial', x['row'])}: {x['description']} ({x['unit']}) · {x['score']:.0f}%"
+                for x in candidates
+            })
+            current_pick = (match['sheet'], match['row']) if match else None
+            default_idx = candidate_ids.index(current_pick) if current_pick in candidate_ids else 0
+
+            r_cols = st.columns(col_w, vertical_alignment="center")
+            r_cols[0].markdown(f"**#{cdc_no}**")
+            r_cols[1].write(orig_desc)
+            r_cols[2].write(f"{format_quantity(raw_qty)} {raw_unit or '—'}")
+            r_cols[3].selectbox(
+                "Assign CDC",
+                options=candidate_ids,
+                index=default_idx,
+                format_func=lambda k: option_names[k],
+                key=f'pick_{serial}_{index}',
+                label_visibility="collapsed"
+            )
+            r_cols[4].write(f"{format_quantity(cdc_qty)} {cdc_unit}")
+            r_cols[5].write(f"${th_price_val:,.2f}" if th_price_val is not None else "—")
+            if top_score >= 99:
+                r_cols[6].markdown(":green-badge[100%]")
+            elif top_score >= 60:
+                r_cols[6].markdown(f":orange-badge[{top_score:.0f}%]")
+            else:
+                r_cols[6].markdown(":red-badge[Unmatched]")
+
+            with r_cols[7].popover("", icon=":material/tune:", help="Tune search keyword or save translation to memory"):
+                st.markdown(f"**Line {r['row']}:** `{orig_desc}`")
                 edited = st.text_input(
-                    "Translation / Search Query",
-                    value=r.get("query", r.get("chinese", "")),
-                    key=f"translation_{serial}_{index}",
-                    label_visibility="collapsed",
+                    "English search keyword",
+                    value=base_results[index]['query'],
+                    key=f'translation_{serial}_{index}',
+                    label_visibility="visible"
                 )
-                if st.button("Save to memory", icon=":material/save:", key=f"save_tr_{serial}_{index}", width="stretch"):
+                if st.button("Save to Memory", icon=":material/save:", key=f'save_tr_{serial}_{index}', width="stretch"):
                     try:
-                        save_verified_translation(TRANSLATIONS_PATH, r["chinese"], edited)
-                        st.toast("Saved translation to memory", icon=":material/check:")
+                        save_verified_translation(TRANSLATIONS_PATH, r['chinese'], edited)
+                        st.toast("Saved translation to memory!", icon=":material/check:")
                     except Exception as e:
-                        st.error(f"Could not save: {e}")
+                        st.error(f'Could not save: {e}')
 
 # TAB 2: INVOICE PERMIT PREVIEW
 with tab_permit_inv:
