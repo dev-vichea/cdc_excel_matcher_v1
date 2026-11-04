@@ -20,14 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code and assets
-COPY app.py .
-COPY app_pages/ ./app_pages/
-COPY services/ ./services/
-COPY .streamlit/ ./.streamlit/
-COPY examples/ ./examples/
-COPY reference/ ./reference/
-COPY data/ ./data/
+# Copy project files (respecting .dockerignore)
+COPY . .
 
 # Expose Streamlit default web port
 EXPOSE 8501
