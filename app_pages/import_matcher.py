@@ -13,7 +13,7 @@ import openpyxl.utils
 import pandas as pd
 import streamlit as st
 
-from services.bill_extractor import extract_bill
+from services.bill_extractor import extract_bill, reconcile_bill_and_shipping
 from services.cutstock_updater import (
     apply_deductions_to_cdc_workbook,
     consolidate_deductions,
@@ -256,6 +256,12 @@ with st.container(border=True):
             st.caption("Optional: B/L or transport document.")
         else:
             st.caption(f":material/check_circle: Selected: `{billfile.name}`")
+            if active_job and (active_job.get("bill_bytes") != billfile.getvalue() or not active_job.get("bill_meta")):
+                active_job["bill_bytes"] = billfile.getvalue()
+                active_job["bill_filename"] = billfile.name
+                active_job["bill_meta"] = extract_bill(billfile.getvalue(), billfile.name)
+                st.session_state["job"] = active_job
+                st.rerun()
 
     # Optional Custom Permit Template Expander
     active_tpl_name = active_job.get("template_filename") if active_job else default_tpl_name
@@ -392,16 +398,73 @@ elif shipmeta.get("invoice_date"):
 if not permit_date_str:
     permit_date_str = datetime.now().strftime("%d-%b-%Y")
 
+shipping_mode_val = bill_meta.get("shipping_mode") or shipmeta.get("shipping_mode") or "BY SEA"
+bl_number_val = bill_meta.get("bl_no") or "—"
+has_bill_doc = bool(bill_meta.get("has_bill") or job.get("bill_bytes"))
+
 with st.container(border=True):
-    c_info1, c_info2, c_act = st.columns([4, 4, 2], vertical_alignment="center")
+    c_info1, c_info2, c_info3, c_act = st.columns([3.5, 3.0, 2.5, 2.0], vertical_alignment="center")
     with c_info1:
         st.markdown(f"**{t('inv_consignee', lang)}:** `{shipmeta.get('consignee') or 'Unknown'}`  \n**{t('inv_no', lang)}:** `{shipmeta.get('invoice_no') or 'Unknown'}` ({permit_date_str})")
     with c_info2:
-        bl_text = f"  \n**{t('bill_no', lang)}:** `{bill_meta['bl_no']}` ({bill_meta.get('shipping_mode', 'BY TRUCK')})" if bill_meta.get("bl_no") else ""
-        st.markdown(f"**Shipper:** `{shipmeta.get('supplier') or 'Unknown'}`  \n**QIP / CIB:** `{cdcmeta.get('qip') or '211/26'}`{bl_text}")
+        st.markdown(f"**Shipper:** `{shipmeta.get('supplier') or 'Unknown'}`  \n**QIP / CIB:** `{cdcmeta.get('qip') or '211/26'}`")
+    with c_info3:
+        st.markdown(f"**{t('shipping_mode', lang)}:** `{shipping_mode_val}`  \n**{t('bill_no', lang)}:** `{bl_number_val}`")
     with c_act:
         if st.button(t("view_original_btn", lang), icon=":material/visibility:", width="stretch"):
             show_original_excel_dialog(job, lang)
+
+if has_bill_doc:
+    reconciliation = reconcile_bill_and_shipping(
+        bill_meta=bill_meta,
+        shipmeta=shipmeta,
+        packingmeta=job.get("packingmeta") or {},
+        invoice_items=results,
+    )
+    is_matched = reconciliation.get("is_fully_matched", False)
+    recon_status = reconciliation.get("overall_status", "MATCH")
+
+    if is_matched:
+        st.success(
+            f"**{t('bl_reconcile_100', lang)}**: Transport Mode ({shipping_mode_val}), Consignee & Bill Address, Total Packages ({pkg_count:g}), Gross Weight ({gw_count:,.1f} kg), and Goods Descriptions align between B/L and INV/PL.",
+            icon=":material/verified:"
+        )
+    elif recon_status == "WARNING":
+        st.warning(
+            f"**{t('bl_reconcile_title', lang)}**: Verified with notes. Review checklist below.",
+            icon=":material/info:"
+        )
+    else:
+        st.error(
+            f"**{t('bl_reconcile_warn', lang)}**: Discrepancies detected between B/L and Invoice/Packing List.",
+            icon=":material/warning:"
+        )
+
+    with st.expander(
+        f":material/fact_check: **{t('bl_reconcile_title', lang)}** "
+        f"({'✅ ' + t('bl_reconcile_100', lang) if is_matched else '⚠️ Review Notes'})",
+        expanded=not is_matched
+    ):
+        if reconciliation.get("acc_rule_applied"):
+            st.info(
+                f":material/auto_awesome: **3+ Accessories Matching Rule:** "
+                f"Invoice contains **{reconciliation.get('accessories_count')}** garment accessories. "
+                f"Per customs declaration standard, they match and are declared collectively as **`GARMENT ACCESSORIES`** on the Bill of Lading.",
+                icon=":material/info:"
+            )
+
+        chk_rows = []
+        for c in reconciliation.get("checklist", []):
+            st_badge = "✅ Match" if c["status"] == "MATCH" else ("⚠️ Note" if c["status"] == "WARNING" else "❌ Mismatch")
+            chk_rows.append({
+                "Parameter": c["item"],
+                "Bill of Lading (B/L)": c["bill_value"],
+                "Invoice & Packing List": c["inv_value"],
+                "Match Status": st_badge,
+                "Verification Details": c["note"]
+            })
+
+        st.dataframe(pd.DataFrame(chk_rows), hide_index=True, width="stretch")
 
 periods = detect_period_columns(job["cdc_bytes"], sheet_name=cdcmeta.get("sheet"))
 consolidation = consolidate_deductions(results, selections)

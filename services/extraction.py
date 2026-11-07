@@ -67,7 +67,7 @@ def _format_date(val):
 def extract_shipping(data, filename):
     items = []
     metadata = {
-        'invoice_no': '', 'invoice_date': '', 'consignee': '', 'consignee_address': '',
+        'invoice_no': '', 'invoice_date': '', 'consignee': '', 'consignee_address': '', 'vat': '',
         'supplier': '', 'supplier_address': '', 'origin': '', 'destination': '',
         'shipping_mode': 'BY SEA', 'country_of_origin': 'CHINA', 'category': '', 'sheet': ''
     }
@@ -86,6 +86,19 @@ def extract_shipping(data, filename):
         for rn, cells in rows[:35]:
             vals = [_value(v) for v in cells]
             line_upper = ' '.join(vals).upper()
+
+            # Transport Mode detection from invoice text
+            if any(kw in line_upper for kw in ['BY TRUCK', 'TRUCK WAY', 'TRUCKING', 'BY ROAD']):
+                meta['shipping_mode'] = 'BY TRUCK'
+            elif any(kw in line_upper for kw in ['BY AIR', 'AIR WAY', 'AIR FREIGHT']):
+                meta['shipping_mode'] = 'BY AIR'
+            elif any(kw in line_upper for kw in ['BY SEA', 'OCEAN VESSEL', 'SEA FREIGHT']):
+                meta['shipping_mode'] = 'BY SEA'
+
+            # VAT detection
+            m_v = re.search(r'VAT[:\s]*([A-Za-z0-9\-]+)', line_upper)
+            if m_v and not meta.get('vat'):
+                meta['vat'] = m_v.group(1).strip()
 
             # Supplier detection
             if rn <= 4 and not meta['supplier']:
